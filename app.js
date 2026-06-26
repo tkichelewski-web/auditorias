@@ -893,23 +893,32 @@ const App={
   },
   cancelCadastro(){state.view='dashboard';render();},
   async saveCadastros(){
-    if(!state.isOnline){alert('Requer internet para salvar cadastros.');return;}
+    if(!state.isOnline){alert('Requer conexão com a internet para salvar cadastros.');return;}
+    const btn=document.querySelector('.score-footer .btn-primary');
+    if(btn){btn.disabled=true;btn.textContent='Salvando...';}
     try{
-      const uRows=state.cadastroDraft.unidades.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,sigla:x.sigla||x.nome.slice(0,4).toUpperCase()}));if(uRows.length)await supabaseClient.from('unidades').upsert(uRows,{onConflict:'id'});
-      const rmU=state.unidades.filter(x=>!uRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmU.length)await supabaseClient.from('unidades').delete().in('id',rmU);
-      const dRows=state.cadastroDraft.diretorias.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null}));if(dRows.length)await supabaseClient.from('diretorias').upsert(dRows,{onConflict:'id'});
-      const rmD=state.diretorias.filter(x=>!dRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmD.length)await supabaseClient.from('diretorias').delete().in('id',rmD);
-      const tRows=state.cadastroDraft.turnos.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,horario_inicio:x.horario_inicio||'',horario_fim:x.horario_fim||'',unidade_id:x.unidade_id||null}));if(tRows.length)await supabaseClient.from('turnos').upsert(tRows,{onConflict:'id'});
-      const rmT=state.turnos.filter(x=>!tRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmT.length)await supabaseClient.from('turnos').delete().in('id',rmT);
-      const aRows=state.cadastroDraft.areas.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null,diretoria_id:x.diretoria_id||null}));if(aRows.length)await supabaseClient.from('areas').upsert(aRows,{onConflict:'id'});
-      const rmA=state.areas.filter(x=>!aRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmA.length)await supabaseClient.from('areas').delete().in('id',rmA);
-      const cRows=state.cadastroDraft.colaboradores.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,matricula:x.matricula||null,telefone:x.telefone||null,unidade_id:x.unidade_id||null}));if(cRows.length)await supabaseClient.from('colaboradores').upsert(cRows,{onConflict:'id'});
-      const rmC=state.colaboradores.filter(x=>!cRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmC.length)await supabaseClient.from('colaboradores').delete().in('id',rmC);
+      const uRows=state.cadastroDraft.unidades.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,sigla:x.sigla||x.nome.slice(0,4).toUpperCase()}));if(uRows.length){const{error:eU}=await supabaseClient.from('unidades').upsert(uRows,{onConflict:'id'});if(eU)throw new Error('Unidades: '+eU.message);}
+      const rmU=state.unidades.filter(x=>!uRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmU.length){const{error:eRU}=await supabaseClient.from('unidades').delete().in('id',rmU);if(eRU)throw new Error('Remover unidades: '+eRU.message);}
+      const dRows=state.cadastroDraft.diretorias.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null}));if(dRows.length){const{error:eD}=await supabaseClient.from('diretorias').upsert(dRows,{onConflict:'id'});if(eD)throw new Error('Diretorias: '+eD.message);}
+      const rmD=state.diretorias.filter(x=>!dRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmD.length){const{error:eRD}=await supabaseClient.from('diretorias').delete().in('id',rmD);if(eRD)throw new Error('Remover diretorias: '+eRD.message);}
+      const tRows=state.cadastroDraft.turnos.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,horario_inicio:x.horario_inicio||'',horario_fim:x.horario_fim||'',unidade_id:x.unidade_id||null}));if(tRows.length){const{error:eT}=await supabaseClient.from('turnos').upsert(tRows,{onConflict:'id'});if(eT)throw new Error('Turnos: '+eT.message);}
+      const rmT=state.turnos.filter(x=>!tRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmT.length){const{error:eRT}=await supabaseClient.from('turnos').delete().in('id',rmT);if(eRT)throw new Error('Remover turnos: '+eRT.message);}
+      const aRows=state.cadastroDraft.areas.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null,diretoria_id:x.diretoria_id||null}));if(aRows.length){const{error:eA}=await supabaseClient.from('areas').upsert(aRows,{onConflict:'id'});if(eA)throw new Error('Areas: '+eA.message);}
+      const rmA=state.areas.filter(x=>!aRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmA.length){const{error:eRA}=await supabaseClient.from('areas').delete().in('id',rmA);if(eRA)throw new Error('Remover areas: '+eRA.message);}
+      const cRows=state.cadastroDraft.colaboradores.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,matricula:x.matricula||null,telefone:x.telefone||null,unidade_id:x.unidade_id||null}));if(cRows.length){const{error:eC}=await supabaseClient.from('colaboradores').upsert(cRows,{onConflict:'id'});if(eC)throw new Error('Colaboradores: '+eC.message);}
+      const rmC=state.colaboradores.filter(x=>!cRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmC.length){const{error:eRC}=await supabaseClient.from('colaboradores').delete().in('id',rmC);if(eRC)throw new Error('Remover colaboradores: '+eRC.message);}
       if(state.configDraft){const cfgRows=[{chave:'peso_conforme',valor:String(state.configDraft.peso_conforme),descricao:'Pontuação Conforme'},{chave:'peso_om',valor:String(state.configDraft.peso_om),descricao:'Pontuação OM'},{chave:'peso_nc',valor:String(state.configDraft.peso_nc),descricao:'Pontuação NC'},{chave:'whatsapp_ssma',valor:state.configDraft.whatsapp_ssma||'',descricao:'WhatsApp SSMA'}];await supabaseClient.from('configuracoes').upsert(cfgRows,{onConflict:'chave'});state.config=await loadConfig();}
-    }catch(e){console.error(e);alert('Não foi possível salvar.');return;}
+    }catch(e){
+      console.error('saveCadastros:',e);
+      if(btn){btn.disabled=false;btn.textContent='Salvar cadastros';}
+      alert('❌ Não foi possível salvar.\n\n'+e.message+'\n\nVerifique:\n• Se o schema.sql foi rodado corretamente no Supabase\n• Se a URL e chave no config.js estão corretas\n• Se há conexão com a internet');
+      return;
+    }
     const[u,d,t,a,c]=await Promise.all([loadUnidades(),loadDiretorias(),loadTurnos(),loadAreas(),loadColaboradores()]);
     state.unidades=u;state.diretorias=d;state.turnos=t;state.areas=a;state.colaboradores=c;
     await Promise.all([cacheSet('unidades',u),cacheSet('diretorias',d),cacheSet('turnos',t),cacheSet('areas',a),cacheSet('colaboradores',c)]);
+    if(btn){btn.disabled=false;btn.textContent='Salvar cadastros';}
+    showToast('✅ Cadastros salvos com sucesso!','ok');
     state.view='dashboard';render();
   },
 
