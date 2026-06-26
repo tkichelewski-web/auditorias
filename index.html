@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#07583B">
+<title>Auditoria SSMA · Usina Santa Adélia</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="hazard"></div>
+<div class="topbar">
+  <div class="topbar__inner">
+    <div>
+      <p class="brand__eyebrow">Usina Santa Adélia — SSMA</p>
+      <h1 class="brand__title">Auditoria Interna</h1>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+      <div id="online-status"></div>
+      <nav class="nav" id="nav">
+        <button class="nav__btn" data-nav="dashboard"   onclick="App.goDashboard()">Painel</button>
+        <button class="nav__btn" data-nav="form"        onclick="App.goNewAudit()">Nova Auditoria</button>
+        <button class="nav__btn" data-nav="acoes"       onclick="App.goAcoes()">Planos de Ação</button>
+        <button class="nav__btn" data-nav="formularios" onclick="App.goFormularios()">Formulários</button>
+        <button class="nav__btn" data-nav="cadastros"   onclick="App.goCadastros()">Cadastros</button>
+      </nav>
+    </div>
+  </div>
+</div>
+
+<div class="shell" id="app">
+  <div class="loading">Carregando…</div>
+</div>
+
+<!-- Dexie (IndexedDB wrapper para armazenamento offline) -->
+<script src="https://cdn.jsdelivr.net/npm/dexie@3/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="supabaseClient.js"></script>
+<script src="app.js"></script>
+
+<script>
+  // Registra Service Worker para funcionamento offline
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('SW registrado:', reg.scope))
+        .catch(err => console.warn('SW falhou:', err));
+    });
+  }
+</script>
+</body>
+</html>

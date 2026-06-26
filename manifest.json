@@ -1,0 +1,14 @@
+{
+  "name": "Auditoria SSMA — Usina Santa Adélia",
+  "short_name": "Auditoria SSMA",
+  "description": "Plataforma de Auditoria Interna SSMA com suporte offline",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07583B",
+  "theme_color": "#07583B",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
