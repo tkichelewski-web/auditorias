@@ -176,7 +176,22 @@ function guessMapSenior(h){
     desccc:f(['desc_centro','desc_cc','descrição_cc','descricao_cc']),
   };
 }
-function parseDate(s){if(!s||!s.trim())return null;const p=s.trim().split(/[\/\-]/);if(p.length<3)return null;if(p[0].length===4)return s.trim().slice(0,10);return p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');}
+function parseDate(s){
+  if(!s||!s.trim())return null;
+  let v=s.trim().split(/[\sT]/)[0]; // remove componente de hora, se houver
+  if(!v)return null;
+  // Já no formato ISO (AAAA-MM-DD)
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;
+  // DD/MM/AAAA ou DD-MM-AAAA
+  const m=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m){
+    const day=m[1].padStart(2,'0'),month=m[2].padStart(2,'0'),year=m[3];
+    const mi=parseInt(month,10),di=parseInt(day,10);
+    if(mi<1||mi>12||di<1||di>31)return null;
+    return`${year}-${month}-${day}`;
+  }
+  return null; // formato não reconhecido — ignora em vez de quebrar a importação
+}
 
 /* ====== Camada de dados ====== */
 async function withCache(key,fetcher,fallback=[]){
