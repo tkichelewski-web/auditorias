@@ -56,7 +56,7 @@ const state={
   configDraft:{peso_conforme:'1',peso_om:'0.5',peso_nc:'-1',whatsapp_ssma:''},
   cadastroTab:'unidades',
   filterUnidade:'todos',filterDiretoria:'todas',filterArea:'todas',filterFormulario:'todos',filterSearch:'',
-  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,filterAnaliseUnidade:'todos',filterAnaliseDiretoria:'todas',filterAnalisePeriodo:'todos',
+  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,filterAnaliseUnidade:'todos',filterAnaliseDiretoria:'todas',filterAnalisePeriodo:'todos',colabSearch:'',colabFilterUnidade:'todos',colabFilterDiretoria:'todas',colabFilterArea:'todas',colabFilterSituacao:'todos',colabShowLimit:150,colabEditing:null,agendaMonth:new Date().toISOString().slice(0,7),agendamentos:[],agendaLoading:false,agendaFilterUnidade:'todos',agendaEditing:null,agendaDayView:null,
 };
 
 /* ====== Online/Offline ====== */
@@ -187,7 +187,22 @@ async function loadUnidades(){return withCache('unidades',async()=>{const{data,e
 async function loadDiretorias(){return withCache('diretorias',async()=>{const{data,error}=await supabaseClient.from('diretorias').select('*').order('nome');if(error)throw error;return data||[];});}
 async function loadTurnos(){return withCache('turnos',async()=>{const{data,error}=await supabaseClient.from('turnos').select('*').order('nome');if(error)throw error;return data||[];});}
 async function loadAreas(){return withCache('areas',async()=>{const{data,error}=await supabaseClient.from('areas').select('*,diretorias(nome)').order('nome');if(error)throw error;return(data||[]).map(a=>({id:a.id,nome:a.nome,unidade_id:a.unidade_id,diretoria_id:a.diretoria_id||null,diretoria_nome:a.diretorias?.nome||''}));});}
-async function loadColaboradores(){return withCache('colaboradores',async()=>{const{data,error}=await supabaseClient.from('colaboradores').select('id,nome,matricula,telefone,unidade_id,cargo,situacao,gerencia,supervisao,data_nascimento,data_admissao,cod_centro_custo,desc_centro_custo').order('nome');if(error)throw error;return data||[];});}
+async function loadColaboradores(){
+  return withCache('colaboradores',async()=>{
+    // Supabase limita cada consulta a 1000 linhas por padrão — pagina até trazer tudo
+    const PAGE=1000;let all=[],from=0;
+    while(true){
+      const{data,error}=await supabaseClient.from('colaboradores')
+        .select('id,nome,matricula,telefone,unidade_id,diretoria_id,area_id,cargo,situacao,gerencia,supervisao,data_nascimento,data_admissao,cod_centro_custo,desc_centro_custo')
+        .order('nome').range(from,from+PAGE-1);
+      if(error)throw error;
+      all=all.concat(data||[]);
+      if(!data||data.length<PAGE)break;
+      from+=PAGE;
+    }
+    return all;
+  });
+}
 async function loadFormularios(){
   return withCache('formularios',async()=>{
     const{data:f,error}=await supabaseClient.from('formularios').select('id,nome,descricao,opcoes_resposta').eq('ativo',true).order('created_at');if(error)throw error;
@@ -212,9 +227,15 @@ async function loadAuditIndex(){
     const pCards=pending.map(p=>{try{const a=JSON.parse(p.auditData);return{...a,_offline:true,codigo:a.codigo||'OFFLINE',resultado:0,classificacao:'',totalNc:0,totalOm:0};}catch(e){return null;}}).filter(Boolean);
     return[...pCards,...cached];
   }
-  const{data,error}=await supabaseClient.from('audits').select('id,codigo,unidade_nome,unidade_id,area_nome,area_id,diretoria_nome,diretoria_id,turno_nome,formulario_nome,formulario_id,data,resultado,classificacao,total_nc,total_om,atualizado_em').order('data',{ascending:false});
-  if(error)throw error;
-  const list=(data||[]).map(a=>({id:a.id,codigo:a.codigo,unidadeNome:a.unidade_nome,unidadeId:a.unidade_id,areaNome:a.area_nome,areaId:a.area_id,diretoriaNome:a.diretoria_nome||'',diretoriaId:a.diretoria_id,turnoNome:a.turno_nome||'',formularioNome:a.formulario_nome,formularioId:a.formulario_id,data:a.data,resultado:a.resultado,classificacao:a.classificacao,totalNc:a.total_nc,totalOm:a.total_om}));
+  const PAGE=1000;let rawData=[],from=0;
+  while(true){
+    const{data,error}=await supabaseClient.from('audits').select('id,codigo,unidade_nome,unidade_id,area_nome,area_id,diretoria_nome,diretoria_id,turno_nome,formulario_nome,formulario_id,data,resultado,classificacao,total_nc,total_om,atualizado_em').order('data',{ascending:false}).range(from,from+PAGE-1);
+    if(error)throw error;
+    rawData=rawData.concat(data||[]);
+    if(!data||data.length<PAGE)break;
+    from+=PAGE;
+  }
+  const list=rawData.map(a=>({id:a.id,codigo:a.codigo,unidadeNome:a.unidade_nome,unidadeId:a.unidade_id,areaNome:a.area_nome,areaId:a.area_id,diretoriaNome:a.diretoria_nome||'',diretoriaId:a.diretoria_id,turnoNome:a.turno_nome||'',formularioNome:a.formulario_nome,formularioId:a.formulario_id,data:a.data,resultado:a.resultado,classificacao:a.classificacao,totalNc:a.total_nc,totalOm:a.total_om}));
   await cacheSet('auditIndex',list);return list;
 }
 async function loadAuditFull(id){
@@ -240,18 +261,70 @@ async function saveAuditToDb(a,checklist){
   await supabaseClient.from('audit_itens').delete().eq('audit_id',a.id);
   const itemRows=checklist.map(item=>{const r=a.itens[item.id]||{};const pa=r.planoAcao||{};return{audit_id:a.id,checklist_item_id:item.id,checklist_item_texto:item.texto,checklist_item_categoria:item.categoria,status:r.status||null,observacao:r.observacao||'',evidencia_url:r.evidencia&&!r.evidencia.startsWith('data:')?r.evidencia:null,plano_acao_acao:pa.acao||'',plano_acao_responsavel:pa.responsavel||'',plano_acao_prazo:pa.prazo||null,plano_acao_status:pa.status||'pendente',plano_acao_prazo_gestor:pa.prazoGestor||null,plano_acao_comentario_gestor:pa.comentarioGestor||'',plano_acao_status_negociacao:pa.statusNegociacao||'aguardando_gestor'};});
   if(itemRows.length){const{error:e2}=await supabaseClient.from('audit_itens').insert(itemRows);if(e2)throw e2;}
+  await autoLinkAgendamento(a);
 }
 async function loadAcoesIndex(){
   if(!state.isOnline)return(await cacheGet('acoesIndex'))||[];
   try{
-    const{data,error}=await supabaseClient.from('audit_itens').select('id,audit_id,checklist_item_id,checklist_item_texto,plano_acao_acao,plano_acao_responsavel,plano_acao_prazo,plano_acao_status,plano_acao_prazo_gestor,plano_acao_comentario_gestor,plano_acao_status_negociacao,audits(codigo,area_nome,area_id,diretoria_id,unidade_nome,unidade_id,data)').in('status',['nao_conforme','oportunidade_melhoria']);
-    if(error)throw error;
-    const list=(data||[]).map(r=>{const a=r.audits||{};return{rowId:r.id,auditId:r.audit_id,codigo:a.codigo||'',itemTexto:r.checklist_item_texto,areaNome:a.area_nome||'',areaId:a.area_id||'',diretoriaId:a.diretoria_id||'',unidadeNome:a.unidade_nome||'',unidadeId:a.unidade_id||'',data:a.data||'',acao:r.plano_acao_acao||'',responsavel:r.plano_acao_responsavel||'',prazo:r.plano_acao_prazo||'',status:r.plano_acao_status||'pendente',prazoGestor:r.plano_acao_prazo_gestor||'',comentarioGestor:r.plano_acao_comentario_gestor||'',statusNegociacao:r.plano_acao_status_negociacao||'aguardando_gestor'};});
+    const PAGE=1000;let rawData=[],from=0;
+    while(true){
+      const{data,error}=await supabaseClient.from('audit_itens').select('id,audit_id,checklist_item_id,checklist_item_texto,plano_acao_acao,plano_acao_responsavel,plano_acao_prazo,plano_acao_status,plano_acao_prazo_gestor,plano_acao_comentario_gestor,plano_acao_status_negociacao,audits(codigo,area_nome,area_id,diretoria_id,unidade_nome,unidade_id,data)').in('status',['nao_conforme','oportunidade_melhoria']).range(from,from+PAGE-1);
+      if(error)throw error;
+      rawData=rawData.concat(data||[]);
+      if(!data||data.length<PAGE)break;
+      from+=PAGE;
+    }
+    const list=rawData.map(r=>{const a=r.audits||{};return{rowId:r.id,auditId:r.audit_id,codigo:a.codigo||'',itemTexto:r.checklist_item_texto,areaNome:a.area_nome||'',areaId:a.area_id||'',diretoriaId:a.diretoria_id||'',unidadeNome:a.unidade_nome||'',unidadeId:a.unidade_id||'',data:a.data||'',acao:r.plano_acao_acao||'',responsavel:r.plano_acao_responsavel||'',prazo:r.plano_acao_prazo||'',status:r.plano_acao_status||'pendente',prazoGestor:r.plano_acao_prazo_gestor||'',comentarioGestor:r.plano_acao_comentario_gestor||'',statusNegociacao:r.plano_acao_status_negociacao||'aguardando_gestor'};});
     await cacheSet('acoesIndex',list);return list;
   }catch(e){return(await cacheGet('acoesIndex'))||[];}
 }
 async function loadEvolutionData(areaId){if(!state.isOnline)return(await cacheGet('evo:'+areaId))||[];try{const{data}=await supabaseClient.from('audits').select('data,resultado,classificacao,codigo').eq('area_id',areaId).order('data',{ascending:true});const l=data||[];await cacheSet('evo:'+areaId,l);return l;}catch(e){return(await cacheGet('evo:'+areaId))||[];}}
 async function getNextCode(sigla,ano){const{data,error}=await supabaseClient.rpc('get_next_audit_seq',{p_sigla:sigla,p_ano:ano});if(error)throw error;return`AUD-${sigla}-${ano}-${String(data).padStart(3,'0')}`;}
+
+/* ====== Agenda ====== */
+async function loadAgendamentos(yearMonth){
+  const[y,m]=yearMonth.split('-').map(Number);
+  const inicio=`${yearMonth}-01`;
+  const fimDate=new Date(y,m,0); // último dia do mês
+  const fim=`${yearMonth}-${String(fimDate.getDate()).padStart(2,'0')}`;
+  const{data,error}=await supabaseClient.from('agendamentos').select('*').gte('data',inicio).lte('data',fim).order('data',{ascending:true});
+  if(error)throw error;
+  return(data||[]).map(a=>({
+    id:a.id,data:a.data,unidadeId:a.unidade_id,unidadeNome:a.unidade_nome||'',areaId:a.area_id,areaNome:a.area_nome||'',
+    diretoriaId:a.diretoria_id,diretoriaNome:a.diretoria_nome||'',turnoId:a.turno_id,turnoNome:a.turno_nome||'',
+    formularioId:a.formulario_id,formularioNome:a.formulario_nome||'',auditorNome:a.auditor_nome||'',auditorMatricula:a.auditor_matricula||'',
+    observacao:a.observacao||'',status:a.status,auditId:a.audit_id||null
+  }));
+}
+async function saveAgendamentoToDb(ag){
+  const row={id:ag.id,data:ag.data,unidade_id:ag.unidadeId||null,unidade_nome:ag.unidadeNome||'',area_id:ag.areaId||null,area_nome:ag.areaNome||'',
+    diretoria_id:ag.diretoriaId||null,diretoria_nome:ag.diretoriaNome||'',turno_id:ag.turnoId||null,turno_nome:ag.turnoNome||'',
+    formulario_id:ag.formularioId||null,formulario_nome:ag.formularioNome||'',auditor_nome:ag.auditorNome||'',auditor_matricula:ag.auditorMatricula||'',
+    observacao:ag.observacao||'',status:ag.status||'agendado'};
+  const{error}=await supabaseClient.from('agendamentos').upsert(row,{onConflict:'id'});
+  if(error)throw error;
+}
+async function deleteAgendamentoDb(id){const{error}=await supabaseClient.from('agendamentos').delete().eq('id',id);if(error)throw error;}
+// Vincula automaticamente uma auditoria recém-salva a um agendamento pendente da mesma área/mês
+async function autoLinkAgendamento(audit){
+  if(!audit.areaId||!audit.data)return;
+  try{
+    const yearMonth=audit.data.slice(0,7);
+    const inicio=yearMonth+'-01';
+    const[y,m]=yearMonth.split('-').map(Number);
+    const fim=yearMonth+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
+    const{data,error}=await supabaseClient.from('agendamentos').select('id,data')
+      .eq('area_id',audit.areaId).eq('status','agendado').is('audit_id',null)
+      .gte('data',inicio).lte('data',fim).order('data',{ascending:true});
+    if(error||!data||!data.length)return;
+    // Escolhe o agendamento com data mais próxima da data real da auditoria
+    const alvo=audit.data;
+    let melhor=data[0],menorDiff=Math.abs(new Date(data[0].data)-new Date(alvo));
+    data.forEach(d=>{const diff=Math.abs(new Date(d.data)-new Date(alvo));if(diff<menorDiff){menorDiff=diff;melhor=d;}});
+    await supabaseClient.from('agendamentos').update({audit_id:audit.id}).eq('id',melhor.id);
+  }catch(e){console.warn('autoLinkAgendamento falhou (não crítico):',e);}
+}
+
 
 /* ====== WhatsApp ====== */
 function buildWhatsAppLink(audit, reportUrl){
@@ -420,7 +493,9 @@ function render(){
     else if(state.view==='cadastros')root.innerHTML=cadastrosHtml();
     else if(state.view==='acoes')root.innerHTML=acoesHtml();
     else if(state.view==='analise')root.innerHTML=analiseHtml();
+    else if(state.view==='agenda')root.innerHTML=agendaHtml();
     else if(state.view==='analise')root.innerHTML=analiseHtml();
+    else if(state.view==='agenda')root.innerHTML=agendaHtml();
   }catch(e){console.error(e);root.innerHTML=`<div class="empty"><strong>Erro</strong>${esc(e.message)}</div>`;}
 }
 
@@ -705,10 +780,10 @@ function cadastrosHtml(){
     <div class="tabs" style="margin-bottom:16px;display:inline-flex;flex-wrap:wrap;">${tabs.map(([k,l])=>`<button class="tabs__btn ${state.cadastroTab===k?'is-active':''}" onclick="App.setCadastroTab('${k}')">${l}</button>`).join('')}</div>
     <div id="cadastro-body">${state.cadastroTab==='unidades'?unidadesTabHtml():state.cadastroTab==='diretorias'?diretoriasTabHtml():state.cadastroTab==='turnos'?turnosTabHtml():state.cadastroTab==='areas'?areasTabHtml():state.cadastroTab==='colaboradores'?colaboradoresTabHtml():configuracaoTabHtml()}</div>
   </div></div>
-  <div class="score-footer" style="position:static;margin-top:18px;">
-    <div class="score-footer__info"><div class="score-footer__pct">${state.cadastroDraft.unidades.length} un · ${state.cadastroDraft.diretorias.length} dir · ${state.cadastroDraft.turnos.length} turn · ${state.cadastroDraft.areas.length} área(s) · ${state.cadastroDraft.colaboradores.length} colab</div></div>
+  ${state.cadastroTab==='colaboradores'?'':`<div class="score-footer" style="position:static;margin-top:18px;">
+    <div class="score-footer__info"><div class="score-footer__pct">${state.cadastroDraft.unidades.length} un · ${state.cadastroDraft.diretorias.length} dir · ${state.cadastroDraft.turnos.length} turn · ${state.cadastroDraft.areas.length} área(s)</div></div>
     <div class="score-footer__actions"><button class="btn-secondary" onclick="App.cancelCadastro()">Cancelar</button><button class="btn-primary" onclick="App.saveCadastros()">Salvar cadastros</button></div>
-  </div>`;}
+  </div>`}`;}
 function unidadesTabHtml(){const l=state.cadastroDraft.unidades;return`<div class="manager-cat">${l.length?l.map(u=>`<div class="manager-item"><input type="text" style="flex:2;" value="${esc(u.nome)}" placeholder="Nome" oninput="App.setCField('unidades','${u.id}','nome',this.value)"><input type="text" style="flex:1;max-width:90px;" value="${esc(u.sigla)}" placeholder="Sigla" oninput="App.setCField('unidades','${u.id}','sigla',this.value)"><button onclick="App.removeCItem('unidades','${u.id}')">✕</button></div>`).join(''):'<p style="color:var(--ink-soft);font-size:.88rem;">Nenhuma unidade cadastrada.</p>'}</div><button class="btn-ghost" onclick="App.addCItem('unidades')">+ adicionar unidade</button>`;}
 function diretoriasTabHtml(){const l=state.cadastroDraft.diretorias;return`<div class="manager-cat">${l.length?l.map(d=>`<div class="manager-item"><input type="text" style="flex:1;" value="${esc(d.nome)}" placeholder="Nome da diretoria" oninput="App.setCField('diretorias','${d.id}','nome',this.value)"><select onchange="App.setCField('diretorias','${d.id}','unidade_id',this.value)"><option value="">Unidade</option>${state.cadastroDraft.unidades.map(u=>`<option value="${u.id}" ${d.unidade_id===u.id?'selected':''}>${esc(u.sigla||u.nome)}</option>`).join('')}</select><button onclick="App.removeCItem('diretorias','${d.id}')">✕</button></div>`).join(''):'<p style="color:var(--ink-soft);font-size:.88rem;">Nenhuma diretoria cadastrada.</p>'}</div><button class="btn-ghost" onclick="App.addCItem('diretorias')">+ adicionar diretoria</button>`;}
 function turnosTabHtml(){
@@ -723,7 +798,121 @@ function turnosTabHtml(){
   </div>`).join(''):'<p style="color:var(--ink-soft);font-size:.88rem;">Nenhum turno cadastrado.</p>'}</div>
   <button class="btn-ghost" onclick="App.addCItem('turnos')">+ adicionar turno</button>`;}
 function areasTabHtml(){const l=state.cadastroDraft.areas;return`<div class="manager-cat">${l.length?l.map(a=>`<div class="manager-item"><input type="text" style="flex:1;min-width:120px;" value="${esc(a.nome)}" placeholder="Nome da área" oninput="App.setCField('areas','${a.id}','nome',this.value)"><select onchange="App.setCField('areas','${a.id}','unidade_id',this.value)"><option value="">Unidade</option>${state.cadastroDraft.unidades.map(u=>`<option value="${u.id}" ${a.unidade_id===u.id?'selected':''}>${esc(u.sigla||u.nome)}</option>`).join('')}</select><select onchange="App.setCField('areas','${a.id}','diretoria_id',this.value)"><option value="">Diretoria</option>${state.cadastroDraft.diretorias.filter(d=>!a.unidade_id||d.unidade_id===a.unidade_id).map(d=>`<option value="${d.id}" ${a.diretoria_id===d.id?'selected':''}>${esc(d.nome)}</option>`).join('')}</select><button onclick="App.removeCItem('areas','${a.id}')">✕</button></div>`).join(''):'<p style="color:var(--ink-soft);font-size:.88rem;">Nenhuma área cadastrada.</p>'}</div><button class="btn-ghost" onclick="App.addCItem('areas')">+ adicionar área</button>`;}
-function colaboradoresTabHtml(){const l=state.cadastroDraft.colaboradores;return`<div class="import-row"><label class="btn-secondary" style="cursor:pointer;margin:0;">📥 Importar CSV do Senior<input type="file" accept=".csv,text/csv" style="display:none" onchange="App.importCSV(this)"></label><span class="import-row__hint">Exportar do Senior como .csv.</span></div><div class="manager-cat">${l.length?l.map(c=>`<div class="manager-item"><input type="text" style="flex:2;min-width:110px;" value="${esc(c.nome)}" placeholder="Nome" oninput="App.setCField('colaboradores','${c.id}','nome',this.value)"><input type="text" style="flex:1;min-width:80px;" value="${esc(c.matricula)}" placeholder="Matrícula" oninput="App.setCField('colaboradores','${c.id}','matricula',this.value)"><input type="text" style="flex:1;min-width:110px;" value="${esc(c.telefone||'')}" placeholder="WhatsApp (ex: 16999990000)" oninput="App.setCField('colaboradores','${c.id}','telefone',this.value)"><select onchange="App.setCField('colaboradores','${c.id}','unidade_id',this.value)"><option value="">Unidade</option>${state.cadastroDraft.unidades.map(u=>`<option value="${u.id}" ${c.unidade_id===u.id?'selected':''}>${esc(u.sigla||u.nome)}</option>`).join('')}</select><button onclick="App.removeCItem('colaboradores','${c.id}')">✕</button></div>`).join(''):'<p style="color:var(--ink-soft);font-size:.88rem;">Nenhum colaborador cadastrado.</p>'}</div><button class="btn-ghost" onclick="App.addCItem('colaboradores')">+ adicionar manualmente</button>`;}
+function colaboradorFilterOptions(){
+  return{
+    unidades:state.unidades,
+    diretorias:state.colabFilterUnidade==='todos'?state.diretorias:state.diretorias.filter(d=>d.unidade_id===state.colabFilterUnidade),
+    areas:state.colabFilterUnidade==='todos'?state.areas:state.areas.filter(a=>a.unidade_id===state.colabFilterUnidade),
+  };
+}
+function filteredColaboradores(){
+  const q=(state.colabSearch||'').toLowerCase().trim();
+  return state.colaboradores.filter(c=>{
+    if(state.colabFilterUnidade!=='todos'&&c.unidade_id!==state.colabFilterUnidade)return false;
+    if(state.colabFilterDiretoria!=='todas'&&c.diretoria_id!==state.colabFilterDiretoria)return false;
+    if(state.colabFilterArea!=='todas'&&c.area_id!==state.colabFilterArea)return false;
+    if(state.colabFilterSituacao!=='todos'){
+      const sit=(c.situacao||'').toUpperCase();
+      if(state.colabFilterSituacao==='ATIVO'&&!sit.startsWith('ATIV'))return false;
+      if(state.colabFilterSituacao==='INATIVO'&&sit.startsWith('ATIV'))return false;
+    }
+    if(q&&!((c.nome||'').toLowerCase().includes(q)||(c.matricula||'').toLowerCase().includes(q)))return false;
+    return true;
+  });
+}
+function colaboradoresTabHtml(){
+  const opts=colaboradorFilterOptions();
+  const all=filteredColaboradores();
+  const total=state.colaboradores.length;
+  const shown=all.slice(0,state.colabShowLimit);
+  const unMap={};state.unidades.forEach(u=>unMap[u.id]=u.sigla||u.nome);
+  const dirMap={};state.diretorias.forEach(d=>dirMap[d.id]=d.nome);
+  const areaMap={};state.areas.forEach(a=>areaMap[a.id]=a.nome);
+
+  return`
+  <div class="import-row">
+    <label class="btn-secondary" style="cursor:pointer;margin:0;">📥 Importar CSV do Senior<input type="file" accept=".csv,text/csv" style="display:none" onchange="App.importCSV(this)"></label>
+    <span class="import-row__hint">Grava direto no banco — não precisa clicar em "Salvar cadastros" depois.</span>
+    <button class="btn-secondary" style="margin-left:auto;" onclick="App.colabOpenNew()">+ Adicionar manualmente</button>
+  </div>
+  <div id="csv-progress"></div>
+  <div class="filterbar" style="margin-bottom:12px;">
+    <input class="search" style="max-width:240px;" placeholder="Buscar nome ou matrícula…" value="${esc(state.colabSearch)}" oninput="App.setColabSearch(this.value)">
+    <select class="flt-select" onchange="App.setColabFilterU(this.value)">
+      <option value="todos">Todas unidades</option>
+      ${opts.unidades.map(u=>`<option value="${u.id}" ${state.colabFilterUnidade===u.id?'selected':''}>${esc(u.nome)}</option>`).join('')}
+    </select>
+    <select class="flt-select" onchange="App.setColabFilterD(this.value)">
+      <option value="todas">Todas diretorias</option>
+      ${opts.diretorias.map(d=>`<option value="${d.id}" ${state.colabFilterDiretoria===d.id?'selected':''}>${esc(d.nome)}</option>`).join('')}
+    </select>
+    <select class="flt-select" onchange="App.setColabFilterA(this.value)">
+      <option value="todas">Todos locais</option>
+      ${opts.areas.map(a=>`<option value="${a.id}" ${state.colabFilterArea===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}
+    </select>
+    <select class="flt-select" onchange="App.setColabFilterSit(this.value)">
+      <option value="todos" ${state.colabFilterSituacao==='todos'?'selected':''}>Todas situações</option>
+      <option value="ATIVO" ${state.colabFilterSituacao==='ATIVO'?'selected':''}>Somente ativos</option>
+      <option value="INATIVO" ${state.colabFilterSituacao==='INATIVO'?'selected':''}>Somente inativos</option>
+    </select>
+  </div>
+  <p style="font-size:.78rem;color:var(--ink-soft);margin:0 0 8px;">
+    ${total} colaborador(es) no total · ${all.length} encontrado(s) com os filtros atuais${all.length>shown.length?` · mostrando os primeiros ${shown.length} — refine a busca para ver mais`:''}
+  </p>
+  ${state.colabEditing?colabEditPanelHtml():''}
+  ${shown.length?`<div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;"><table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+    <thead><tr style="background:var(--paper);position:sticky;top:0;">
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Matrícula</th>
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Nome</th>
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Unidade</th>
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Diretoria</th>
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Local</th>
+      <th style="text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Cargo</th>
+      <th style="text-align:center;padding:8px 10px;border-bottom:2px solid var(--line);font-size:.7rem;color:var(--ink-soft);text-transform:uppercase;">Situação</th>
+      <th style="padding:8px 10px;border-bottom:2px solid var(--line);"></th>
+    </tr></thead>
+    <tbody>${shown.map(c=>{
+      const ativo=(c.situacao||'').toUpperCase().startsWith('ATIV');
+      return`<tr style="border-bottom:1px solid var(--line);">
+        <td style="padding:7px 10px;font-family:var(--mono);">${esc(c.matricula||'—')}</td>
+        <td style="padding:7px 10px;font-weight:600;">${esc(c.nome)}</td>
+        <td style="padding:7px 10px;">${esc(unMap[c.unidade_id]||'—')}</td>
+        <td style="padding:7px 10px;">${esc(dirMap[c.diretoria_id]||'—')}</td>
+        <td style="padding:7px 10px;">${esc(areaMap[c.area_id]||'—')}</td>
+        <td style="padding:7px 10px;color:var(--ink-soft);">${esc(c.cargo||'—')}</td>
+        <td style="padding:7px 10px;text-align:center;"><span class="chip" style="background:${ativo?'var(--ok-bg)':'var(--na-bg)'};color:${ativo?'var(--ok)':'var(--ink-soft)'};">${esc(c.situacao||'—')}</span></td>
+        <td style="padding:7px 10px;white-space:nowrap;">
+          <button class="btn-ghost" style="padding:2px 6px;" onclick="App.colabOpenEdit('${c.id}')" title="Editar">✏️</button>
+          <button class="btn-ghost" style="padding:2px 6px;color:var(--bad);" onclick="App.colabDelete('${c.id}')" title="Excluir">🗑</button>
+        </td>
+      </tr>`;}).join('')}
+    </tbody>
+  </table></div>
+  ${all.length>shown.length?`<button class="btn-secondary" style="margin-top:10px;" onclick="App.colabShowMore()">Mostrar mais ${Math.min(150,all.length-shown.length)}</button>`:''}`
+  :`<div class="empty"><strong>${total===0?'Nenhum colaborador cadastrado ainda':'Nenhum resultado para os filtros atuais'}</strong>${total===0?'Use "Importar CSV do Senior" para começar.':''}</div>`}
+  `;
+}
+function colabEditPanelHtml(){
+  const c=state.colabEditing;
+  const isNew=!c._existing;
+  return`<div class="panel" style="margin-bottom:14px;border-color:var(--brand);"><div class="panel__pad">
+    <h4 style="margin:0 0 12px;color:var(--brand);">${isNew?'Novo colaborador':'Editar colaborador'}</h4>
+    <div class="field-grid">
+      <div class="field field--3"><label>Nome *</label><input type="text" value="${esc(c.nome)}" oninput="App.colabEditField('nome',this.value)"></div>
+      <div class="field field--2"><label>Matrícula</label><input type="text" value="${esc(c.matricula||'')}" oninput="App.colabEditField('matricula',this.value)"></div>
+      <div class="field field--1"><label>Situação</label><select onchange="App.colabEditField('situacao',this.value)"><option value="ATIVO" ${c.situacao==='ATIVO'?'selected':''}>ATIVO</option><option value="INATIVO" ${c.situacao==='INATIVO'?'selected':''}>INATIVO</option></select></div>
+      <div class="field field--2"><label>Unidade</label><select onchange="App.colabEditField('unidade_id',this.value)"><option value="">—</option>${state.unidades.map(u=>`<option value="${u.id}" ${c.unidade_id===u.id?'selected':''}>${esc(u.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Diretoria</label><select onchange="App.colabEditField('diretoria_id',this.value)"><option value="">—</option>${state.diretorias.filter(d=>!c.unidade_id||d.unidade_id===c.unidade_id).map(d=>`<option value="${d.id}" ${c.diretoria_id===d.id?'selected':''}>${esc(d.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Local</label><select onchange="App.colabEditField('area_id',this.value)"><option value="">—</option>${state.areas.filter(a=>!c.unidade_id||a.unidade_id===c.unidade_id).map(a=>`<option value="${a.id}" ${c.area_id===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select></div>
+      <div class="field field--3"><label>Cargo</label><input type="text" value="${esc(c.cargo||'')}" oninput="App.colabEditField('cargo',this.value)"></div>
+      <div class="field field--3"><label>WhatsApp</label><input type="text" placeholder="16999990000" value="${esc(c.telefone||'')}" oninput="App.colabEditField('telefone',this.value)"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-primary" onclick="App.colabSaveEdit()">Salvar</button>
+      <button class="btn-secondary" onclick="App.colabCancelEdit()">Cancelar</button>
+    </div>
+  </div></div>`;
+}
 function configuracaoTabHtml(){
   const c=state.configDraft;
   return`<div style="max-width:540px;">
@@ -747,6 +936,162 @@ function configuracaoTabHtml(){
   </div>`;}
 
 /* ====== Planos de Ação ====== */
+
+/* ====== Agenda — render ====== */
+const MESES_PT=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const DOW_PT=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function agendaComputeStatus(ag){
+  if(ag.status==='cancelado')return'cancelado';
+  if(ag.auditId)return'realizado';
+  const today=new Date().toISOString().slice(0,10);
+  if(ag.data<today)return'atrasado';
+  return'agendado';
+}
+function agendaHtml(){
+  const[y,m]=state.agendaMonth.split('-').map(Number);
+  const monthTitle=MESES_PT[m-1]+' de '+y;
+  if(state.agendaLoading)return`<div class="agenda-month-nav"><button onclick="App.agendaPrevMonth()">‹</button><span class="agenda-month-nav__title">${monthTitle}</span><button onclick="App.agendaNextMonth()">›</button></div><div class="loading">Carregando agenda…</div>`;
+
+  const list=state.agendamentos.filter(ag=>state.agendaFilterUnidade==='todos'||ag.unidadeId===state.agendaFilterUnidade);
+  const withStatus=list.map(ag=>({...ag,_status:agendaComputeStatus(ag)}));
+
+  // KPIs
+  const total=withStatus.length;
+  const realizados=withStatus.filter(a=>a._status==='realizado').length;
+  const atrasados=withStatus.filter(a=>a._status==='atrasado').length;
+  const pendentes=withStatus.filter(a=>a._status==='agendado').length;
+
+  // Agrupa por dia para o calendário
+  const byDay={};
+  withStatus.forEach(ag=>{const day=parseInt(ag.data.slice(8,10),10);if(!byDay[day])byDay[day]=[];byDay[day].push(ag);});
+
+  // Agrupa por área para a distribuição
+  const byArea={};
+  withStatus.forEach(ag=>{const k=ag.areaNome||'—';if(!byArea[k])byArea[k]={nome:k,agendado:0,realizado:0,atrasado:0,cancelado:0,total:0};byArea[k][ag._status]++;byArea[k].total++;});
+  const areasComAgenda=new Set(Object.keys(byArea));
+  // Áreas sem nenhum agendamento esse mês (considerando filtro de unidade)
+  const areasRelevantes=state.agendaFilterUnidade==='todos'?state.areas:state.areas.filter(a=>a.unidade_id===state.agendaFilterUnidade);
+  const areasSemAgenda=areasRelevantes.filter(a=>!areasComAgenda.has(a.nome));
+  const distribuicao=[...Object.values(byArea).sort((a,b)=>b.total-a.total),...areasSemAgenda.map(a=>({nome:a.nome,agendado:0,realizado:0,atrasado:0,cancelado:0,total:0}))];
+  const maxTotal=Math.max(...distribuicao.map(d=>d.total),1);
+
+  const uOpts=state.unidades.map(u=>`<option value="${u.id}" ${state.agendaFilterUnidade===u.id?'selected':''}>${esc(u.nome)}</option>`).join('');
+
+  return`
+  <div class="filterbar" style="margin-bottom:6px;">
+    <h2 style="font-weight:800;font-size:1.35rem;margin:0;color:var(--brand);">Agenda de Auditorias</h2>
+    <select class="flt-select" style="margin-left:auto;" onchange="App.setAgendaFilterUnidade(this.value)"><option value="todos">Todas unidades</option>${uOpts}</select>
+    <button class="btn-primary" onclick="App.agendaOpenNew()">+ Agendar auditoria</button>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi__value">${total}</div><div class="kpi__label">Agendadas no mês</div></div>
+    <div class="kpi"><div class="kpi__value">${pendentes}</div><div class="kpi__label">Pendentes</div></div>
+    <div class="kpi"><div class="kpi__value">${atrasados}</div><div class="kpi__label">Atrasadas</div></div>
+    <div class="kpi"><div class="kpi__value">${realizados}</div><div class="kpi__label">Realizadas</div></div>
+  </div>
+  ${state.agendaEditing?agendaEditPanelHtml():(state.agendaDayView?agendaDayPanelHtml(withStatus):'')}
+  <div class="agenda-month-nav">
+    <button onclick="App.agendaPrevMonth()">‹</button>
+    <span class="agenda-month-nav__title">${monthTitle}</span>
+    <button onclick="App.agendaNextMonth()">›</button>
+    <button class="btn-ghost" style="margin-left:6px;" onclick="App.agendaGoToday()">Hoje</button>
+  </div>
+  <div class="panel" style="margin-bottom:20px;"><div class="panel__pad">
+    ${calendarGridHtml(y,m,byDay)}
+  </div></div>
+  <div class="panel"><div class="panel__pad">
+    <h3 style="font-weight:700;font-size:1rem;color:var(--brand);margin:0 0 6px;">📍 Distribuição por Local</h3>
+    <p style="font-size:.8rem;color:var(--ink-soft);margin:0 0 14px;">Veja se as auditorias do mês estão bem distribuídas entre os locais — áreas com 0 agendamentos aparecem destacadas.</p>
+    ${distribuicao.length?distribuicao.map(d=>{
+      const pct=v=>maxTotal>0?(v/maxTotal*100).toFixed(1):0;
+      return`<div class="agenda-area-row">
+        <span class="agenda-area-row__name">${esc(d.nome)}${d.total===0?' <span class="agenda-empty-warn">0 agendadas</span>':''}</span>
+        <div class="agenda-area-row__bar">
+          ${d.realizado?`<div style="background:var(--ok);width:${pct(d.realizado)}%;"></div>`:''}
+          ${d.agendado?`<div style="background:#3B82F6;width:${pct(d.agendado)}%;"></div>`:''}
+          ${d.atrasado?`<div style="background:var(--bad);width:${pct(d.atrasado)}%;"></div>`:''}
+          ${d.cancelado?`<div style="background:var(--na);width:${pct(d.cancelado)}%;"></div>`:''}
+        </div>
+        <span class="agenda-area-row__count">${d.total} no mês</span>
+      </div>`;}).join(''):'<p style="color:var(--ink-soft);font-size:.85rem;">Nenhuma área cadastrada.</p>'}
+    <div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;font-size:.76rem;color:var(--ink-soft);">
+      <span><span style="display:inline-block;width:9px;height:9px;background:#3B82F6;border-radius:2px;margin-right:4px;"></span>Agendado</span>
+      <span><span style="display:inline-block;width:9px;height:9px;background:var(--ok);border-radius:2px;margin-right:4px;"></span>Realizado</span>
+      <span><span style="display:inline-block;width:9px;height:9px;background:var(--bad);border-radius:2px;margin-right:4px;"></span>Atrasado</span>
+      <span><span style="display:inline-block;width:9px;height:9px;background:var(--na);border-radius:2px;margin-right:4px;"></span>Cancelado</span>
+    </div>
+  </div></div>`;
+}
+function calendarGridHtml(year,month,byDay){
+  const firstDow=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const today=new Date().toISOString().slice(0,10);
+  const cells=[];
+  for(let i=0;i<firstDow;i++)cells.push(null);
+  for(let d=1;d<=daysInMonth;d++)cells.push(d);
+  while(cells.length%7!==0)cells.push(null);
+
+  return`<div class="cal-grid">
+    ${DOW_PT.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+    ${cells.map(d=>{
+      if(d===null)return'<div class="cal-day cal-day--empty"></div>';
+      const dateStr=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isToday=dateStr===today;
+      const ags=(byDay[d]||[]).slice().sort((a,b)=>a.areaNome.localeCompare(b.areaNome));
+      const shown=ags.slice(0,3);
+      return`<div class="cal-day ${isToday?'cal-day--today':''}" onclick="App.agendaOpenDay('${dateStr}')">
+        <span class="cal-day__num">${d}</span>
+        ${shown.map(ag=>`<span class="cal-chip cal-chip--${ag._status}" title="${esc(ag.areaNome)} — ${esc(ag.auditorNome||'sem auditor')}">${esc(ag.areaNome)}</span>`).join('')}
+        ${ags.length>3?`<span class="cal-day__more">+${ags.length-3} mais</span>`:''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function agendaDayPanelHtml(withStatus){
+  const dateStr=state.agendaDayView;
+  const items=withStatus.filter(ag=>ag.data===dateStr);
+  const[y,m,d]=dateStr.split('-');
+  const statusLabel={agendado:'Agendado',realizado:'Realizado',atrasado:'Atrasado',cancelado:'Cancelado'};
+  return`<div class="panel" style="margin-bottom:18px;"><div class="panel__pad">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <h4 style="margin:0;color:var(--brand);">📅 ${d}/${m}/${y}</h4>
+      <button class="btn-ghost" style="margin-left:auto;" onclick="App.agendaCloseDayView()">Fechar</button>
+    </div>
+    ${items.length?items.map(ag=>`<div class="audit-card" style="cursor:pointer;margin-bottom:8px;" onclick="App.agendaOpenEdit('${ag.id}')">
+      <div class="audit-card__body">
+        <div class="audit-card__top"><span class="audit-card__area">${esc(ag.areaNome)}</span><span class="tag">${esc(ag.unidadeNome)}</span><span class="cal-chip cal-chip--${ag._status}">${statusLabel[ag._status]}</span></div>
+        <div class="audit-card__meta">👤 ${esc(ag.auditorNome||'sem auditor definido')}${ag.turnoNome?' · '+esc(ag.turnoNome):''}${ag.formularioNome?' · '+esc(ag.formularioNome):''}</div>
+      </div>
+    </div>`).join(''):'<p style="color:var(--ink-soft);font-size:.86rem;">Nenhum agendamento neste dia ainda.</p>'}
+    <button class="btn-secondary" style="margin-top:6px;" onclick="App.agendaOpenNew('${dateStr}')">+ Agendar novo neste dia</button>
+  </div></div>`;
+}
+
+function agendaEditPanelHtml(){
+  const ag=state.agendaEditing;
+  const isNew=!ag._existing;
+  const areasFilt=ag.unidadeId?state.areas.filter(a=>a.unidade_id===ag.unidadeId):state.areas;
+  const turnosFilt=ag.unidadeId?state.turnos.filter(t=>t.unidade_id===ag.unidadeId||!t.unidade_id):state.turnos;
+  return`<div class="panel" style="margin-bottom:18px;border-color:var(--brand);"><div class="panel__pad">
+    <h4 style="margin:0 0 12px;color:var(--brand);">${isNew?'Agendar nova auditoria':'Editar agendamento'}</h4>
+    <div class="field-grid">
+      <div class="field field--2"><label>Data *</label><input type="date" value="${esc(ag.data)}" onchange="App.agendaEditField('data',this.value)"></div>
+      <div class="field field--2"><label>Unidade *</label><select onchange="App.agendaEditUnidade(this.value)"><option value="">—</option>${state.unidades.map(u=>`<option value="${u.id}" ${ag.unidadeId===u.id?'selected':''}>${esc(u.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Local/Área *</label><select onchange="App.agendaEditArea(this.value)"><option value="">—</option>${areasFilt.map(a=>`<option value="${a.id}" ${ag.areaId===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Turno</label><select onchange="App.agendaEditField('turnoId',this.value)"><option value="">—</option>${turnosFilt.map(t=>`<option value="${t.id}" ${ag.turnoId===t.id?'selected':''}>${esc(t.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Formulário</label><select onchange="App.agendaEditFormulario(this.value)"><option value="">—</option>${state.formularios.map(f=>`<option value="${f.id}" ${ag.formularioId===f.id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></div>
+      <div class="field field--2"><label>Auditor responsável *</label><input type="text" list="dl-agenda-auditor" value="${esc(ag.auditorNome)}" placeholder="Nome" oninput="App.agendaEditField('auditorNome',this.value)" onchange="App.agendaAutoFillAuditor(this.value)"></div>
+      <datalist id="dl-agenda-auditor">${state.colaboradores.slice(0,500).map(c=>`<option value="${esc(c.nome)}">`).join('')}</datalist>
+      <div class="field field--6"><label>Observação (opcional)</label><input type="text" value="${esc(ag.observacao||'')}" oninput="App.agendaEditField('observacao',this.value)"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+      <button class="btn-primary" onclick="App.agendaSave()">Salvar</button>
+      ${isNew?'':`<button class="btn-secondary" onclick="App.agendaToggleCancelado()">${ag.status==='cancelado'?'Reativar':'Cancelar agendamento'}</button><button class="btn-danger" onclick="App.agendaDelete('${ag.id}')">Excluir</button>`}
+      <button class="btn-secondary" onclick="App.agendaCancelEdit()">Fechar</button>
+    </div>
+  </div></div>`;
+}
+
 function acoesHtml(){
   const today=new Date().toISOString().slice(0,10);
   let ab=0,at=0,and=0,co=0,aguardAprov=0;
@@ -953,10 +1298,57 @@ const App={
   async goEditFormulario(id){document.getElementById('app').innerHTML='<div class="loading">Carregando…</div>';const f=await loadFormularioWithItems(id);if(!f){state.view='formularios';render();return;}state.editingFormulario={...f,opcoes:f.opcoes||[...DEFAULT_OPCOES]};state.view='formulario-editor';render();},
 
   goCadastros(){
-    state.cadastroDraft={unidades:JSON.parse(JSON.stringify(state.unidades)),diretorias:JSON.parse(JSON.stringify(state.diretorias)),turnos:JSON.parse(JSON.stringify(state.turnos)),areas:JSON.parse(JSON.stringify(state.areas)),colaboradores:JSON.parse(JSON.stringify(state.colaboradores))};
+    state.cadastroDraft={unidades:JSON.parse(JSON.stringify(state.unidades)),diretorias:JSON.parse(JSON.stringify(state.diretorias)),turnos:JSON.parse(JSON.stringify(state.turnos)),areas:JSON.parse(JSON.stringify(state.areas)),colaboradores:[]};
     state.configDraft={...state.config};state.cadastroTab='unidades';state.view='cadastros';render();
   },
   goAcoes(){state.view='acoes';render();},
+  async goAgenda(){
+    state.view='agenda';state.agendaLoading=true;state.agendaEditing=null;render();
+    try{state.agendamentos=await loadAgendamentos(state.agendaMonth);}catch(e){console.error(e);state.agendamentos=[];}
+    state.agendaLoading=false;render();
+  },
+  async agendaPrevMonth(){const[y,m]=state.agendaMonth.split('-').map(Number);const d=new Date(y,m-2,1);state.agendaMonth=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');await App.goAgenda();},
+  async agendaNextMonth(){const[y,m]=state.agendaMonth.split('-').map(Number);const d=new Date(y,m,1);state.agendaMonth=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');await App.goAgenda();},
+  async agendaGoToday(){state.agendaMonth=new Date().toISOString().slice(0,7);await App.goAgenda();},
+  async setAgendaFilterUnidade(v){state.agendaFilterUnidade=v;render();},
+  agendaOpenNew(prefillDate){
+    state.agendaDayView=null;
+    state.agendaEditing={_existing:false,id:newUUID(),data:prefillDate||new Date().toISOString().slice(0,10),unidadeId:'',unidadeNome:'',areaId:'',areaNome:'',diretoriaId:'',diretoriaNome:'',turnoId:'',turnoNome:'',formularioId:'',formularioNome:'',auditorNome:'',auditorMatricula:'',observacao:'',status:'agendado'};
+    render();
+    const el=document.querySelector('.panel');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
+  },
+  agendaOpenDay(dateStr){
+    const temAlgo=state.agendamentos.some(a=>a.data===dateStr);
+    if(temAlgo){state.agendaDayView=dateStr;state.agendaEditing=null;render();const el=document.querySelector('.panel');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});}
+    else{App.agendaOpenNew(dateStr);}
+  },
+  agendaCloseDayView(){state.agendaDayView=null;render();},
+  agendaOpenEdit(id){const ag=state.agendamentos.find(a=>a.id===id);if(!ag)return;state.agendaDayView=null;state.agendaEditing={...ag,_existing:true};render();},
+  agendaCancelEdit(){state.agendaEditing=null;render();},
+  agendaEditField(key,value){if(state.agendaEditing)state.agendaEditing[key]=value;},
+  agendaEditUnidade(uid){const u=state.unidades.find(x=>x.id===uid);if(!state.agendaEditing)return;state.agendaEditing.unidadeId=uid;state.agendaEditing.unidadeNome=u?u.nome:'';state.agendaEditing.areaId='';state.agendaEditing.areaNome='';state.agendaEditing.diretoriaId='';state.agendaEditing.diretoriaNome='';render();},
+  agendaEditArea(aid){const a=state.areas.find(x=>x.id===aid);if(!state.agendaEditing)return;state.agendaEditing.areaId=aid;state.agendaEditing.areaNome=a?a.nome:'';state.agendaEditing.diretoriaId=a?.diretoria_id||'';state.agendaEditing.diretoriaNome=a?.diretoria_nome||'';},
+  agendaEditFormulario(fid){const f=state.formularios.find(x=>x.id===fid);if(!state.agendaEditing)return;state.agendaEditing.formularioId=fid;state.agendaEditing.formularioNome=f?f.nome:'';},
+  agendaAutoFillAuditor(nome){const c=state.colaboradores.find(x=>x.nome===nome);if(c&&state.agendaEditing)state.agendaEditing.auditorMatricula=c.matricula||'';},
+  agendaToggleCancelado(){if(!state.agendaEditing)return;state.agendaEditing.status=state.agendaEditing.status==='cancelado'?'agendado':'cancelado';render();},
+  async agendaSave(){
+    const ag=state.agendaEditing;
+    if(!ag.data){alert('Selecione a data.');return;}
+    if(!ag.unidadeId){alert('Selecione a unidade.');return;}
+    if(!ag.areaId){alert('Selecione o local/área.');return;}
+    if(!ag.auditorNome.trim()){alert('Informe o auditor responsável.');return;}
+    try{await saveAgendamentoToDb(ag);}catch(e){alert('Não foi possível salvar: '+e.message);return;}
+    state.agendaEditing=null;
+    state.agendamentos=await loadAgendamentos(state.agendaMonth);
+    render();showToast('✅ Agendamento salvo!','ok');
+  },
+  async agendaDelete(id){
+    if(!confirm('Excluir este agendamento?'))return;
+    try{await deleteAgendamentoDb(id);}catch(e){alert('Não foi possível excluir: '+e.message);return;}
+    state.agendaEditing=null;
+    state.agendamentos=state.agendamentos.filter(a=>a.id!==id);
+    render();showToast('Agendamento removido.','ok');
+  },
   async goAnalise(){
     state.analiseData=null;state.analiseLoading=true;state.view='analise';render();
     try{state.analiseData=await loadAnaliseData();}catch(e){console.error(e);}
@@ -1123,6 +1515,42 @@ const App={
   async deleteFormulario(id){if(!confirm('Excluir este formulário?'))return;await supabaseClient.from('formularios').update({ativo:false}).eq('id',id);state.formularios=await loadFormularios();render();},
 
   setCadastroTab(t){state.cadastroTab=t;render();},
+  // ===== Tabela de Colaboradores (independente do cadastroDraft) =====
+  setColabSearch(v){state.colabSearch=v;state.colabShowLimit=150;render();},
+  setColabFilterU(v){state.colabFilterUnidade=v;state.colabFilterDiretoria='todas';state.colabFilterArea='todas';state.colabShowLimit=150;render();},
+  setColabFilterD(v){state.colabFilterDiretoria=v;state.colabShowLimit=150;render();},
+  setColabFilterA(v){state.colabFilterArea=v;state.colabShowLimit=150;render();},
+  setColabFilterSit(v){state.colabFilterSituacao=v;state.colabShowLimit=150;render();},
+  colabShowMore(){state.colabShowLimit+=150;render();},
+  colabOpenNew(){state.colabEditing={_existing:false,nome:'',matricula:'',telefone:'',unidade_id:'',diretoria_id:'',area_id:'',cargo:'',situacao:'ATIVO'};render();const el=document.querySelector('.cadastro-body, #cadastro-body');if(el)el.scrollIntoView({behavior:'smooth'});},
+  colabOpenEdit(id){const c=state.colaboradores.find(x=>x.id===id);if(!c)return;state.colabEditing={...c,_existing:true};render();},
+  colabCancelEdit(){state.colabEditing=null;render();},
+  colabEditField(key,value){if(state.colabEditing)state.colabEditing[key]=value;},
+  async colabSaveEdit(){
+    const c=state.colabEditing;if(!c||!c.nome.trim()){alert('Informe o nome.');return;}
+    const row={nome:c.nome.trim(),matricula:c.matricula||null,telefone:c.telefone||'',unidade_id:c.unidade_id||null,diretoria_id:c.diretoria_id||null,area_id:c.area_id||null,cargo:c.cargo||'',situacao:c.situacao||'ATIVO'};
+    try{
+      if(c._existing){
+        const{error}=await supabaseClient.from('colaboradores').update(row).eq('id',c.id);
+        if(error)throw error;
+      }else{
+        const{error}=await supabaseClient.from('colaboradores').insert({id:newUUID(),...row});
+        if(error)throw error;
+      }
+    }catch(e){alert('Não foi possível salvar: '+e.message);return;}
+    state.colabEditing=null;
+    state.colaboradores=await loadColaboradores();
+    await cacheSet('colaboradores',state.colaboradores);
+    render();showToast('✅ Colaborador salvo!','ok');
+  },
+  async colabDelete(id){
+    if(!confirm('Excluir este colaborador?'))return;
+    try{const{error}=await supabaseClient.from('colaboradores').delete().eq('id',id);if(error)throw error;}
+    catch(e){alert('Não foi possível excluir: '+e.message);return;}
+    state.colaboradores=state.colaboradores.filter(x=>x.id!==id);
+    await cacheSet('colaboradores',state.colaboradores);
+    render();showToast('Colaborador removido.','ok');
+  },
   addCItem(tbl){
     const base=tbl==='unidades'?{id:newUUID(),nome:'',sigla:''}:tbl==='diretorias'?{id:newUUID(),nome:'',unidade_id:''}:tbl==='turnos'?{id:newUUID(),nome:'',horario_inicio:'',horario_fim:'',unidade_id:''}:tbl==='areas'?{id:newUUID(),nome:'',unidade_id:'',diretoria_id:''}:{id:newUUID(),nome:'',matricula:'',telefone:'',unidade_id:'',cargo:'',situacao:'ATIVO',gerencia:'',supervisao:''};
     state.cadastroDraft[tbl].push(base);render();
@@ -1147,13 +1575,25 @@ const App={
       alert('❌ Não foi possível identificar colunas essenciais (Nome e/ou Matrícula).\n\n'+diagMsg+'\n\nVerifique se o arquivo tem cabeçalho na primeira linha com esses nomes.');
       inputEl.value='';return;
     }
-    const prosseguir=confirm(diagMsg+'\n\nOs dados parecem corretos? Clique OK para continuar.');
+    const prosseguir=confirm(diagMsg+'\n\nOs dados parecem corretos? Clique OK para continuar.\n\nOs dados serão gravados DIRETO no banco (não precisa clicar em "Salvar cadastros" depois).');
     if(!prosseguir){inputEl.value='';return;}
 
     const onlyAtivo=confirm('Importar apenas colaboradores com situação ATIVO?\n\n(OK = somente ativos · Cancelar = importar todos, independente da situação)');
-    let added=0,upd=0,ignInativo=0,ignSemNome=0,ignSemMat=0;
-    const novosLocais=new Set(),novasDirs=new Set(),novasUnids=new Set();
+
+    const progEl=document.getElementById('csv-progress');
+    const setProg=(msg)=>{if(progEl)progEl.innerHTML=`<div style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.85rem;color:var(--brand);font-family:var(--mono);">⏳ ${msg}</div>`;};
+    setProg('Processando arquivo…');
+
+    // ===== Passo 1: detectar/criar Unidades, Diretorias, Áreas (Locais) — listas pequenas, direto no banco =====
+    const unidByName={};state.unidades.forEach(u=>{unidByName[u.nome.toLowerCase()]=u;if(u.sigla)unidByName[u.sigla.toLowerCase()]=u;});
+    const dirByKey={};state.diretorias.forEach(d=>dirByKey[(d.unidade_id||'')+'|'+d.nome.toLowerCase()]=d);
+    const areaByKey={};state.areas.forEach(a=>areaByKey[(a.unidade_id||'')+'|'+a.nome.toLowerCase()]=a);
+    const novasUnidsArr=[],novasDirsArr=[],novosLocaisArr=[];
+    const novasUnids=new Set(),novasDirs=new Set(),novosLocais=new Set();
+
+    let ignSemNome=0,ignInativo=0,ignSemMat=0;
     const situacoesEncontradas=new Set();
+    const colabRows=[]; // linhas prontas para upsert
 
     rows.forEach(r=>{
       const get=(idx)=>idx>-1?(r[idx]||'').trim():'';
@@ -1167,37 +1607,84 @@ const App={
 
       const unidNome=get(map.unid),dirNome=get(map.diretoria),localNome=get(map.local);
 
-      let unid=unidNome?state.cadastroDraft.unidades.find(u=>u.nome.toLowerCase()===unidNome.toLowerCase()||u.sigla.toLowerCase()===unidNome.toLowerCase()):null;
-      if(!unid&&unidNome){unid={id:newUUID(),nome:unidNome,sigla:unidNome.slice(0,4).toUpperCase()};state.cadastroDraft.unidades.push(unid);novasUnids.add(unidNome);}
+      let unid=unidNome?unidByName[unidNome.toLowerCase()]:null;
+      if(!unid&&unidNome){unid={id:newUUID(),nome:unidNome,sigla:unidNome.slice(0,4).toUpperCase()};unidByName[unidNome.toLowerCase()]=unid;novasUnidsArr.push(unid);novasUnids.add(unidNome);}
 
-      let dir=dirNome?state.cadastroDraft.diretorias.find(d=>d.nome.toLowerCase()===dirNome.toLowerCase()&&(!unid||d.unidade_id===unid.id||!d.unidade_id)):null;
-      if(!dir&&dirNome){dir={id:newUUID(),nome:dirNome,unidade_id:unid?.id||''};state.cadastroDraft.diretorias.push(dir);novasDirs.add(dirNome);}
+      const dirKey=(unid?.id||'')+'|'+dirNome.toLowerCase();
+      let dir=dirNome?dirByKey[dirKey]:null;
+      if(!dir&&dirNome){dir={id:newUUID(),nome:dirNome,unidade_id:unid?.id||null};dirByKey[dirKey]=dir;novasDirsArr.push(dir);novasDirs.add(dirNome);}
 
-      let area=localNome?state.cadastroDraft.areas.find(a=>a.nome.toLowerCase()===localNome.toLowerCase()&&(!unid||a.unidade_id===unid.id||!a.unidade_id)):null;
-      if(!area&&localNome){area={id:newUUID(),nome:localNome,unidade_id:unid?.id||'',diretoria_id:dir?.id||''};state.cadastroDraft.areas.push(area);novosLocais.add(localNome);}
+      const areaKey=(unid?.id||'')+'|'+localNome.toLowerCase();
+      let area=localNome?areaByKey[areaKey]:null;
+      if(!area&&localNome){area={id:newUUID(),nome:localNome,unidade_id:unid?.id||null,diretoria_id:dir?.id||null};areaByKey[areaKey]=area;novosLocaisArr.push(area);novosLocais.add(localNome);}
       else if(area&&dir&&!area.diretoria_id){area.diretoria_id=dir.id;}
 
-      const colabData={nome,matricula:mat||null,telefone:'',unidade_id:unid?.id||'',
+      if(!mat)ignSemMat++;
+      colabRows.push({
+        id:newUUID(),nome,matricula:mat||null,telefone:'',
+        unidade_id:unid?.id||null,diretoria_id:dir?.id||null,area_id:area?.id||null,
         cargo:get(map.cargo),situacao,gerencia:get(map.gerencia),supervisao:get(map.supervisao),
         data_nascimento:parseDate(get(map.nasc)),data_admissao:parseDate(get(map.admiss)),
-        cod_centro_custo:get(map.codcc),desc_centro_custo:get(map.desccc)};
-
-      if(!mat)ignSemMat++;
-      const ex=state.cadastroDraft.colaboradores.find(c=>(mat&&c.matricula===mat)||(!mat&&c.nome.toLowerCase()===nome.toLowerCase()));
-      if(ex){Object.assign(ex,colabData);upd++;}
-      else{state.cadastroDraft.colaboradores.push({id:newUUID(),...colabData});added++;}
+        cod_centro_custo:get(map.codcc),desc_centro_custo:get(map.desccc)
+      });
     });
 
-    render();
-    const partes=[`✅ ${added} colaborador(es) novo(s)`,`🔄 ${upd} atualizado(s)`];
-    if(ignInativo)partes.push(`⏭ ${ignInativo} ignorado(s) por situação diferente de ATIVO`);
-    if(ignSemNome)partes.push(`⚠ ${ignSemNome} linha(s) sem nome (ignoradas)`);
-    if(ignSemMat)partes.push(`ℹ ${ignSemMat} sem matrícula (importados mesmo assim, vinculados pelo nome)`);
-    if(novasUnids.size)partes.push(`🏭 Unidades criadas: ${[...novasUnids].join(', ')}`);
-    if(novasDirs.size)partes.push(`🏢 Diretorias criadas: ${[...novasDirs].join(', ')}`);
-    if(novosLocais.size)partes.push(`📍 Locais/Áreas criados: ${[...novosLocais].join(', ')}`);
-    if(situacoesEncontradas.size)partes.push(`\nValores de situação encontrados no arquivo: ${[...situacoesEncontradas].join(', ')}`);
-    alert('Importação concluída\n\n'+partes.join('\n')+'\n\nRevise os dados abaixo e clique em "Salvar cadastros" para confirmar no banco.');
+    try{
+      // Grava Unidades/Diretorias/Áreas novas primeiro (poucas linhas, rápido)
+      if(novasUnidsArr.length){setProg(`Criando ${novasUnidsArr.length} unidade(s)…`);const{error}=await supabaseClient.from('unidades').upsert(novasUnidsArr,{onConflict:'id'});if(error)throw new Error('Unidades: '+error.message);}
+      if(novasDirsArr.length){setProg(`Criando ${novasDirsArr.length} diretoria(s)…`);const{error}=await supabaseClient.from('diretorias').upsert(novasDirsArr,{onConflict:'id'});if(error)throw new Error('Diretorias: '+error.message);}
+      if(novosLocaisArr.length){setProg(`Criando ${novosLocaisArr.length} local(is)…`);const{error}=await supabaseClient.from('areas').upsert(novosLocaisArr,{onConflict:'id'});if(error)throw new Error('Áreas: '+error.message);}
+
+      // Busca matrículas já existentes no banco para decidir INSERT vs UPDATE corretamente (evita duplicar)
+      setProg('Verificando colaboradores já cadastrados…');
+      const matsNoArquivo=colabRows.filter(c=>c.matricula).map(c=>c.matricula);
+      const existingByMat={};
+      const CHUNK_LOOKUP=500;
+      for(let i=0;i<matsNoArquivo.length;i+=CHUNK_LOOKUP){
+        const slice=matsNoArquivo.slice(i,i+CHUNK_LOOKUP);
+        const{data,error}=await supabaseClient.from('colaboradores').select('id,matricula').in('matricula',slice);
+        if(error)throw new Error('Busca matrículas: '+error.message);
+        (data||[]).forEach(d=>{existingByMat[d.matricula]=d.id;});
+      }
+      let added=0,upd=0;
+      colabRows.forEach(c=>{
+        if(c.matricula&&existingByMat[c.matricula]){c.id=existingByMat[c.matricula];upd++;}
+        else added++;
+      });
+
+      // Upsert em lotes de 500
+      const BATCH=500;
+      for(let i=0;i<colabRows.length;i+=BATCH){
+        const slice=colabRows.slice(i,i+BATCH);
+        setProg(`Gravando colaboradores… ${Math.min(i+BATCH,colabRows.length)}/${colabRows.length}`);
+        const{error}=await supabaseClient.from('colaboradores').upsert(slice,{onConflict:'id'});
+        if(error)throw new Error('Colaboradores (lote '+(i/BATCH+1)+'): '+error.message);
+      }
+
+      setProg('Atualizando listas…');
+      const[u,d,a,c]=await Promise.all([loadUnidades(),loadDiretorias(),loadAreas(),loadColaboradores()]);
+      state.unidades=u;state.diretorias=d;state.areas=a;state.colaboradores=c;
+      state.cadastroDraft.unidades=JSON.parse(JSON.stringify(u));
+      state.cadastroDraft.diretorias=JSON.parse(JSON.stringify(d));
+      state.cadastroDraft.areas=JSON.parse(JSON.stringify(a));
+      await Promise.all([cacheSet('unidades',u),cacheSet('diretorias',d),cacheSet('areas',a),cacheSet('colaboradores',c)]);
+
+      if(progEl)progEl.innerHTML='';
+      render();
+      const partes=[`✅ ${added} colaborador(es) novo(s)`,`🔄 ${upd} atualizado(s) (matrícula já existia)`];
+      if(ignInativo)partes.push(`⏭ ${ignInativo} ignorado(s) por situação diferente de ATIVO`);
+      if(ignSemNome)partes.push(`⚠ ${ignSemNome} linha(s) sem nome (ignoradas)`);
+      if(ignSemMat)partes.push(`ℹ ${ignSemMat} sem matrícula no arquivo`);
+      if(novasUnids.size)partes.push(`🏭 Unidades criadas: ${[...novasUnids].join(', ')}`);
+      if(novasDirs.size)partes.push(`🏢 Diretorias criadas: ${[...novasDirs].join(', ')}`);
+      if(novosLocais.size)partes.push(`📍 Locais/Áreas criados: ${[...novosLocais].join(', ')}`);
+      if(situacoesEncontradas.size)partes.push(`\nValores de situação encontrados: ${[...situacoesEncontradas].join(', ')}`);
+      alert('✅ Importação concluída e gravada no banco!\n\n'+partes.join('\n')+`\n\nTotal de colaboradores no sistema agora: ${c.length}`);
+    }catch(e){
+      console.error('importCSV:',e);
+      if(progEl)progEl.innerHTML='';
+      alert('❌ A importação foi interrompida por um erro.\n\n'+e.message+'\n\nNenhuma alteração adicional será feita. Os lotes já gravados antes do erro permanecem salvos — você pode rodar a importação novamente, ela vai apenas atualizar quem já existe.');
+    }
     inputEl.value='';
   },
   cancelCadastro(){state.view='dashboard';render();},
@@ -1214,8 +1701,7 @@ const App={
       const rmT=state.turnos.filter(x=>!tRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmT.length){const{error:eRT}=await supabaseClient.from('turnos').delete().in('id',rmT);if(eRT)throw new Error('Remover turnos: '+eRT.message);}
       const aRows=state.cadastroDraft.areas.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null,diretoria_id:x.diretoria_id||null}));if(aRows.length){const{error:eA}=await supabaseClient.from('areas').upsert(aRows,{onConflict:'id'});if(eA)throw new Error('Areas: '+eA.message);}
       const rmA=state.areas.filter(x=>!aRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmA.length){const{error:eRA}=await supabaseClient.from('areas').delete().in('id',rmA);if(eRA)throw new Error('Remover areas: '+eRA.message);}
-      const cRows=state.cadastroDraft.colaboradores.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome.trim(),matricula:x.matricula||null,telefone:x.telefone||null,unidade_id:x.unidade_id||null,cargo:x.cargo||'',situacao:x.situacao||'ATIVO',gerencia:x.gerencia||'',supervisao:x.supervisao||'',data_nascimento:x.data_nascimento||null,data_admissao:x.data_admissao||null,cod_centro_custo:x.cod_centro_custo||'',desc_centro_custo:x.desc_centro_custo||''}));if(cRows.length){const{error:eC}=await supabaseClient.from('colaboradores').upsert(cRows,{onConflict:'id'});if(eC)throw new Error('Colaboradores: '+eC.message);}
-      const rmC=state.colaboradores.filter(x=>!cRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmC.length){const{error:eRC}=await supabaseClient.from('colaboradores').delete().in('id',rmC);if(eRC)throw new Error('Remover colaboradores: '+eRC.message);}
+      // Colaboradores agora são gerenciados diretamente na tabela (não fazem parte deste rascunho)
       if(state.configDraft){const cfgRows=[{chave:'peso_conforme',valor:String(state.configDraft.peso_conforme),descricao:'Pontuação Conforme'},{chave:'peso_om',valor:String(state.configDraft.peso_om),descricao:'Pontuação OM'},{chave:'peso_nc',valor:String(state.configDraft.peso_nc),descricao:'Pontuação NC'},{chave:'whatsapp_ssma',valor:state.configDraft.whatsapp_ssma||'',descricao:'WhatsApp SSMA'}];await supabaseClient.from('configuracoes').upsert(cfgRows,{onConflict:'chave'});state.config=await loadConfig();}
     }catch(e){
       console.error('saveCadastros:',e);
