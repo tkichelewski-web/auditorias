@@ -11,6 +11,6 @@ jobs:
     steps:
       - name: Ping no banco
         run: |
-          curl -s -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/NOME_DA_TABELA?select=id&limit=1" \
+          curl -s -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/unidades?select=id&limit=1" \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
