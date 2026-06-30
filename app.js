@@ -56,7 +56,7 @@ const state={
   configDraft:{peso_conforme:'1',peso_om:'0.5',peso_nc:'-1',whatsapp_ssma:''},
   cadastroTab:'unidades',
   filterUnidade:'todos',filterDiretoria:'todas',filterArea:'todas',filterFormulario:'todos',filterSearch:'',
-  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,
+  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,filterAnaliseUnidade:'todos',filterAnaliseDiretoria:'todas',filterAnalisePeriodo:'todos',
 };
 
 /* ====== Online/Offline ====== */
@@ -129,9 +129,34 @@ function stampClass(r){if(r>=90)return'stamp--excelente';if(r>=70)return'stamp--
 function emptyItens(cl){const o={};cl.forEach(it=>{o[it.id]={status:null,observacao:'',evidencia:null,planoAcao:{acao:'',responsavel:'',prazo:'',status:'pendente',statusNegociacao:'aguardando_gestor'}};});return o;}
 
 /* ====== CSV ====== */
-function detectDelim(l){return(l.match(/;/g)||[]).length>(l.match(/,/g)||[]).length?';':',';}
-function parseCSVLine(l,d){const r=[];let cur='',q=false;for(let i=0;i<l.length;i++){const c=l[i];if(c==='"'){if(q&&l[i+1]==='"'){cur+='"';i++;}else q=!q;}else if(c===d&&!q){r.push(cur);cur='';}else cur+=c;}r.push(cur);return r.map(s=>s.trim());}
-function parseCSV(t){const lines=t.split(/\r?\n/).filter(x=>x.length);if(!lines.length)return{headers:[],rows:[]};const d=detectDelim(lines[0]);return{headers:parseCSVLine(lines[0],d),rows:lines.slice(1).map(l=>parseCSVLine(l,d))};}
+function detectDelim(l){
+  const counts={';':(l.match(/;/g)||[]).length,',':(l.match(/,/g)||[]).length,'\t':(l.match(/\t/g)||[]).length};
+  let best=';',bestN=-1;
+  for(const[d,n] of Object.entries(counts)){if(n>bestN){bestN=n;best=d;}}
+  return bestN>0?best:',';
+}
+function parseCSVLine(l,d){const r=[];let cur='',q=false;for(let i=0;i<l.length;i++){const c=l[i];if(c==='"'){if(q&&l[i+1]==='"'){cur+='"';i++;}else q=!q;}else if(c===d&&!q){r.push(cur);cur='';}else cur+=c;}r.push(cur);return r.map(s=>s.trim().replace(/^"|"$/g,''));}
+function parseCSV(t){
+  // Remove BOM se presente
+  if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
+  const lines=t.split(/\r?\n/).filter(x=>x.trim().length);
+  if(!lines.length)return{headers:[],rows:[]};
+  const d=detectDelim(lines[0]);
+  const headers=parseCSVLine(lines[0],d);
+  const rows=lines.slice(1).map(l=>parseCSVLine(l,d)).filter(r=>r.some(c=>c&&c.trim()));
+  return{headers,rows,delimiter:d};
+}
+// Lê o arquivo tentando UTF-8; se detectar muitos caracteres corrompidos (típico de CSV exportado do Senior em Windows-1252/Latin-1), relê com a codificação correta
+async function readCsvFile(file){
+  const buf=await file.arrayBuffer();
+  const utf8Text=new TextDecoder('utf-8').decode(buf);
+  const badChars=(utf8Text.match(/\ufffd/g)||[]).length;
+  if(badChars>2){
+    // Provável Latin-1/Windows-1252 — relê com a codificação correta
+    try{return new TextDecoder('windows-1252').decode(buf);}catch(e){return utf8Text;}
+  }
+  return utf8Text;
+}
 function guessMapSenior(h){
   const l=h.map(x=>x.toLowerCase().trim().replace(/[_\s]+/g,'_'));
   const f=keys=>{for(const k of keys){const i=l.findIndex(x=>x.includes(k));if(i>-1)return i;}return-1;};
@@ -262,14 +287,26 @@ async function loadAnaliseData(){
       .in('status',['nao_conforme','oportunidade_melhoria'])
       .limit(5000),
     supabaseClient.from('audits')
-      .select('id,auditores,total_nc,total_om,resultado,area_nome,unidade_nome,unidade_id,data')
+      .select('id,auditores,total_nc,total_om,resultado,area_nome,unidade_nome,unidade_id,diretoria_id,diretoria_nome,data')
       .order('data',{ascending:false}).limit(2000)
   ]);
-  const audits=auditRes.data||[],items=ncRes.data||[];
+  let audits=auditRes.data||[];
+  const items=ncRes.data||[];
+  // Aplica filtros de unidade/diretoria/período
+  if(state.filterAnaliseUnidade!=='todos')audits=audits.filter(a=>a.unidade_id===state.filterAnaliseUnidade);
+  if(state.filterAnaliseDiretoria!=='todas')audits=audits.filter(a=>a.diretoria_id===state.filterAnaliseDiretoria);
+  if(state.filterAnalisePeriodo!=='todos'){
+    const dias=parseInt(state.filterAnalisePeriodo,10);
+    const limite=new Date();limite.setDate(limite.getDate()-dias);
+    const limiteStr=limite.toISOString().slice(0,10);
+    audits=audits.filter(a=>a.data>=limiteStr);
+  }
+  const auditIds=new Set(audits.map(a=>a.id));
+  const filteredItems=items.filter(row=>auditIds.has(row.audit_id));
   const auditMap={};audits.forEach(a=>auditMap[a.id]=a);
   // NC por item
   const byItem={};
-  items.forEach(row=>{
+  filteredItems.forEach(row=>{
     const a=auditMap[row.audit_id];if(!a)return;
     const k=row.checklist_item_texto;
     if(!byItem[k])byItem[k]={texto:k,categoria:row.checklist_item_categoria||'—',nc:0,om:0,areas:new Set()};
@@ -311,9 +348,22 @@ function analiseHtml(){
   // Bar chart de áreas (top 10)
   const topAreas=d.byArea.slice(0,10);
   const maxMedia=topAreas.length?Math.max(...topAreas.map(a=>a.media)):100;
+  const uOptsAn=state.unidades.map(u=>`<option value="${u.id}" ${state.filterAnaliseUnidade===u.id?'selected':''}>${esc(u.nome)}</option>`).join('');
+  const dOptsAn=(state.filterAnaliseUnidade==='todos'?state.diretorias:state.diretorias.filter(dd=>dd.unidade_id===state.filterAnaliseUnidade)).map(dd=>`<option value="${dd.id}" ${state.filterAnaliseDiretoria===dd.id?'selected':''}>${esc(dd.nome)}</option>`).join('');
   return`<div class="filterbar" style="margin-bottom:18px;flex-wrap:wrap;">
     <h2 style="font-weight:800;font-size:1.35rem;margin:0;color:var(--brand);">Análise de Auditorias</h2>
     <span style="font-family:var(--mono);font-size:.78rem;color:var(--ink-soft);">${d.totalAudits} auditoria(s) analisada(s)</span>
+  </div>
+  <div class="filterbar" style="margin-bottom:18px;">
+    <select class="flt-select" onchange="App.setFAnU(this.value)"><option value="todos">Todas unidades</option>${uOptsAn}</select>
+    <select class="flt-select" onchange="App.setFAnD(this.value)"><option value="todas">Todas diretorias</option>${dOptsAn}</select>
+    <select class="flt-select" onchange="App.setFAnP(this.value)">
+      <option value="todos" ${state.filterAnalisePeriodo==='todos'?'selected':''}>Todo o período</option>
+      <option value="30" ${state.filterAnalisePeriodo==='30'?'selected':''}>Últimos 30 dias</option>
+      <option value="90" ${state.filterAnalisePeriodo==='90'?'selected':''}>Últimos 90 dias</option>
+      <option value="180" ${state.filterAnalisePeriodo==='180'?'selected':''}>Últimos 6 meses</option>
+      <option value="365" ${state.filterAnalisePeriodo==='365'?'selected':''}>Último ano</option>
+    </select>
     <button class="btn-secondary" style="margin-left:auto;" onclick="App.reloadAnalise()">🔄 Atualizar</button>
   </div>
   ${(alertAuditores.length||alertAreas.length)?`<div style="background:var(--om-bg);border:1px solid var(--om);border-radius:10px;padding:14px 16px;margin-bottom:20px;">
@@ -534,8 +584,8 @@ function formHtml(){
 function personRowHtml(type,p,idx,colabs){
   const cargo=p.cargo?' · '+p.cargo:'';
   return`<div class="person-row" id="${type}-row-${idx}">
+    <input class="person-row__mat" type="text" value="${esc(p.matricula)}" placeholder="Matrícula" title="Digite a matrícula e o nome será preenchido automaticamente" autofocus oninput="App.setPersonField('${type}',${idx},'matricula',this.value)" onchange="App.autoFillByMat('${type}',${idx},this.value)" style="flex:1;max-width:130px;">
     <input class="person-row__nome" type="text" list="dl-${type}" value="${esc(p.nome)}" placeholder="Nome" oninput="App.setPersonField('${type}',${idx},'nome',this.value)" onchange="App.autoFillMat('${type}',${idx},this.value)" style="flex:2;">
-    <input class="person-row__mat" type="text" value="${esc(p.matricula)}" placeholder="Matrícula" title="Digite a matrícula para buscar o nome automaticamente" oninput="App.setPersonField('${type}',${idx},'matricula',this.value)" onchange="App.autoFillByMat('${type}',${idx},this.value)" style="flex:1;max-width:130px;">
     ${p.cargo?`<span style="font-size:.75rem;color:var(--ink-soft);align-self:center;white-space:nowrap;">${esc(p.cargo)}</span>`:''}
     <button onclick="App.removePerson('${type}',${idx})" title="Remover">✕</button>
   </div>`;}
@@ -917,6 +967,9 @@ const App={
     try{state.analiseData=await loadAnaliseData();}catch(e){console.error(e);}
     state.analiseLoading=false;render();
   },
+  async setFAnU(v){state.filterAnaliseUnidade=v;state.filterAnaliseDiretoria='todas';await App.reloadAnalise();},
+  async setFAnD(v){state.filterAnaliseDiretoria=v;await App.reloadAnalise();},
+  async setFAnP(v){state.filterAnalisePeriodo=v;await App.reloadAnalise();},
   async syncNow(){await syncPendingAudits();},
 
   setFU(v){state.filterUnidade=v;state.filterDiretoria='todas';state.filterArea='todas';document.getElementById('audit-list').innerHTML=auditListHtml();},
@@ -1079,46 +1132,73 @@ const App={
   setConfigField(key,value){state.configDraft=state.configDraft||{...state.config};state.configDraft[key]=value;},
   async importCSV(inputEl){
     const file=inputEl.files&&inputEl.files[0];if(!file)return;
-    let text;try{text=await file.text();}catch(e){alert('Erro ao ler o arquivo.');return;}
-    const{headers,rows}=parseCSV(text);
-    if(!rows.length){alert('Arquivo sem dados.');return;}
+    let text;try{text=await readCsvFile(file);}catch(e){alert('Erro ao ler o arquivo: '+e.message);return;}
+    const{headers,rows,delimiter}=parseCSV(text);
+    if(!rows.length){alert('❌ Arquivo sem dados ou não foi possível interpretar as linhas.');inputEl.value='';return;}
     const map=guessMapSenior(headers);
-    const onlyAtivo=confirm('Importar apenas colaboradores ATIVOS?\n\n(OK = somente ativos · Cancelar = todos)');
-    let added=0,upd=0,ignInativo=0,ignSemNome=0;
+
+    // ===== Diagnóstico de mapeamento — mostra ANTES de importar =====
+    const colLabel={mat:'Matrícula',nome:'Nome',nasc:'Data Nascimento',admiss:'Data Admissão',unid:'Unidade',diretoria:'Diretoria',gerencia:'Gerência',supervisao:'Supervisão',local:'Local',situacao:'Situação',cargo:'Cargo',codcc:'Cód. Centro Custo',desccc:'Desc. Centro Custo'};
+    const diagLines=Object.entries(map).map(([k,idx])=>`${idx>-1?'✅':'❌'} ${colLabel[k]}: ${idx>-1?headers[idx]:'NÃO ENCONTRADA'}`);
+    const criticosFaltando=(map.nome===-1?1:0)+(map.mat===-1?1:0);
+    let diagMsg=`📄 Arquivo: ${rows.length} linha(s) de dados · ${headers.length} coluna(s) · delimitador "${delimiter==='\t'?'TAB':delimiter}"\n\n`+
+      `Colunas detectadas:\n${diagLines.join('\n')}`;
+    if(criticosFaltando>0){
+      alert('❌ Não foi possível identificar colunas essenciais (Nome e/ou Matrícula).\n\n'+diagMsg+'\n\nVerifique se o arquivo tem cabeçalho na primeira linha com esses nomes.');
+      inputEl.value='';return;
+    }
+    const prosseguir=confirm(diagMsg+'\n\nOs dados parecem corretos? Clique OK para continuar.');
+    if(!prosseguir){inputEl.value='';return;}
+
+    const onlyAtivo=confirm('Importar apenas colaboradores com situação ATIVO?\n\n(OK = somente ativos · Cancelar = importar todos, independente da situação)');
+    let added=0,upd=0,ignInativo=0,ignSemNome=0,ignSemMat=0;
     const novosLocais=new Set(),novasDirs=new Set(),novasUnids=new Set();
+    const situacoesEncontradas=new Set();
+
     rows.forEach(r=>{
       const get=(idx)=>idx>-1?(r[idx]||'').trim():'';
-      const nome=get(map.nome);if(!nome){ignSemNome++;return;}
+      const nome=get(map.nome);
+      if(!nome){ignSemNome++;return;}
       const mat=get(map.mat);
-      const situacao=(get(map.situacao)||'ATIVO').toUpperCase();
-      if(onlyAtivo&&situacao!=='ATIVO'&&situacao!=='ATIVO '&&!situacao.startsWith('ATIVO')){ignInativo++;return;}
-      const unidNome=get(map.unid);const dirNome=get(map.diretoria);const localNome=get(map.local);
-      // Find or create unidade
-      let unid=state.cadastroDraft.unidades.find(u=>u.nome.toLowerCase()===unidNome.toLowerCase()||u.sigla.toLowerCase()===unidNome.toLowerCase());
+      const situacaoRaw=get(map.situacao);
+      const situacao=(situacaoRaw||'ATIVO').toUpperCase().trim();
+      if(situacaoRaw)situacoesEncontradas.add(situacaoRaw);
+      if(onlyAtivo&&!situacao.startsWith('ATIV')){ignInativo++;return;}
+
+      const unidNome=get(map.unid),dirNome=get(map.diretoria),localNome=get(map.local);
+
+      let unid=unidNome?state.cadastroDraft.unidades.find(u=>u.nome.toLowerCase()===unidNome.toLowerCase()||u.sigla.toLowerCase()===unidNome.toLowerCase()):null;
       if(!unid&&unidNome){unid={id:newUUID(),nome:unidNome,sigla:unidNome.slice(0,4).toUpperCase()};state.cadastroDraft.unidades.push(unid);novasUnids.add(unidNome);}
-      // Find or create diretoria
-      let dir=state.cadastroDraft.diretorias.find(d=>d.nome.toLowerCase()===dirNome.toLowerCase());
+
+      let dir=dirNome?state.cadastroDraft.diretorias.find(d=>d.nome.toLowerCase()===dirNome.toLowerCase()&&(!unid||d.unidade_id===unid.id||!d.unidade_id)):null;
       if(!dir&&dirNome){dir={id:newUUID(),nome:dirNome,unidade_id:unid?.id||''};state.cadastroDraft.diretorias.push(dir);novasDirs.add(dirNome);}
-      // Find or create area (local)
-      let area=state.cadastroDraft.areas.find(a=>a.nome.toLowerCase()===localNome.toLowerCase());
+
+      let area=localNome?state.cadastroDraft.areas.find(a=>a.nome.toLowerCase()===localNome.toLowerCase()&&(!unid||a.unidade_id===unid.id||!a.unidade_id)):null;
       if(!area&&localNome){area={id:newUUID(),nome:localNome,unidade_id:unid?.id||'',diretoria_id:dir?.id||''};state.cadastroDraft.areas.push(area);novosLocais.add(localNome);}
-      // Build colab data
+      else if(area&&dir&&!area.diretoria_id){area.diretoria_id=dir.id;}
+
       const colabData={nome,matricula:mat||null,telefone:'',unidade_id:unid?.id||'',
         cargo:get(map.cargo),situacao,gerencia:get(map.gerencia),supervisao:get(map.supervisao),
         data_nascimento:parseDate(get(map.nasc)),data_admissao:parseDate(get(map.admiss)),
         cod_centro_custo:get(map.codcc),desc_centro_custo:get(map.desccc)};
-      const ex=state.cadastroDraft.colaboradores.find(c=>(mat&&c.matricula===mat)||(!mat&&c.nome===nome));
+
+      if(!mat)ignSemMat++;
+      const ex=state.cadastroDraft.colaboradores.find(c=>(mat&&c.matricula===mat)||(!mat&&c.nome.toLowerCase()===nome.toLowerCase()));
       if(ex){Object.assign(ex,colabData);upd++;}
       else{state.cadastroDraft.colaboradores.push({id:newUUID(),...colabData});added++;}
     });
+
     render();
     const partes=[`✅ ${added} colaborador(es) novo(s)`,`🔄 ${upd} atualizado(s)`];
-    if(ignInativo)partes.push(`⏭ ${ignInativo} ignorado(s) por inativo`);
-    if(ignSemNome)partes.push(`⚠ ${ignSemNome} linha(s) sem nome`);
+    if(ignInativo)partes.push(`⏭ ${ignInativo} ignorado(s) por situação diferente de ATIVO`);
+    if(ignSemNome)partes.push(`⚠ ${ignSemNome} linha(s) sem nome (ignoradas)`);
+    if(ignSemMat)partes.push(`ℹ ${ignSemMat} sem matrícula (importados mesmo assim, vinculados pelo nome)`);
     if(novasUnids.size)partes.push(`🏭 Unidades criadas: ${[...novasUnids].join(', ')}`);
     if(novasDirs.size)partes.push(`🏢 Diretorias criadas: ${[...novasDirs].join(', ')}`);
     if(novosLocais.size)partes.push(`📍 Locais/Áreas criados: ${[...novosLocais].join(', ')}`);
-    alert('Importação concluída\n\n'+partes.join('\n')+'\n\nClique em "Salvar cadastros" para confirmar.');
+    if(situacoesEncontradas.size)partes.push(`\nValores de situação encontrados no arquivo: ${[...situacoesEncontradas].join(', ')}`);
+    alert('Importação concluída\n\n'+partes.join('\n')+'\n\nRevise os dados abaixo e clique em "Salvar cadastros" para confirmar no banco.');
+    inputEl.value='';
   },
   cancelCadastro(){state.view='dashboard';render();},
   async saveCadastros(){
