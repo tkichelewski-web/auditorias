@@ -1710,11 +1710,24 @@ const App={
     try{
       const uRows=state.cadastroDraft.unidades.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,sigla:x.sigla||x.nome.slice(0,4).toUpperCase()}));if(uRows.length){const{error:eU}=await supabaseClient.from('unidades').upsert(uRows,{onConflict:'id'});if(eU)throw new Error('Unidades: '+eU.message);}
       const rmU=state.unidades.filter(x=>!uRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmU.length){const{error:eRU}=await supabaseClient.from('unidades').delete().in('id',rmU);if(eRU)throw new Error('Remover unidades: '+eRU.message);}
-      const dRows=state.cadastroDraft.diretorias.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null}));if(dRows.length){const{error:eD}=await supabaseClient.from('diretorias').upsert(dRows,{onConflict:'id'});if(eD)throw new Error('Diretorias: '+eD.message);}
+      const dRows=state.cadastroDraft.diretorias.filter(x=>x.nome.trim()).map(x=>{
+        const validUnidade=uRows.find(u=>u.id===x.unidade_id);
+        return{id:x.id,nome:x.nome,unidade_id:validUnidade?x.unidade_id:null};
+      });
+      if(dRows.length){const{error:eD}=await supabaseClient.from('diretorias').upsert(dRows,{onConflict:'id'});if(eD)throw new Error('Diretorias: '+eD.message);}
       const rmD=state.diretorias.filter(x=>!dRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmD.length){const{error:eRD}=await supabaseClient.from('diretorias').delete().in('id',rmD);if(eRD)throw new Error('Remover diretorias: '+eRD.message);}
-      const tRows=state.cadastroDraft.turnos.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,horario_inicio:x.horario_inicio||'',horario_fim:x.horario_fim||'',unidade_id:x.unidade_id||null}));if(tRows.length){const{error:eT}=await supabaseClient.from('turnos').upsert(tRows,{onConflict:'id'});if(eT)throw new Error('Turnos: '+eT.message);}
+      const tRows=state.cadastroDraft.turnos.filter(x=>x.nome.trim()).map(x=>{
+        const validUnidade=uRows.find(u=>u.id===x.unidade_id);
+        return{id:x.id,nome:x.nome,horario_inicio:x.horario_inicio||'',horario_fim:x.horario_fim||'',unidade_id:validUnidade?x.unidade_id:null};
+      });
+      if(tRows.length){const{error:eT}=await supabaseClient.from('turnos').upsert(tRows,{onConflict:'id'});if(eT)throw new Error('Turnos: '+eT.message);}
       const rmT=state.turnos.filter(x=>!tRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmT.length){const{error:eRT}=await supabaseClient.from('turnos').delete().in('id',rmT);if(eRT)throw new Error('Remover turnos: '+eRT.message);}
-      const aRows=state.cadastroDraft.areas.filter(x=>x.nome.trim()).map(x=>({id:x.id,nome:x.nome,unidade_id:x.unidade_id||null,diretoria_id:x.diretoria_id||null}));if(aRows.length){const{error:eA}=await supabaseClient.from('areas').upsert(aRows,{onConflict:'id'});if(eA)throw new Error('Areas: '+eA.message);}
+      const aRows=state.cadastroDraft.areas.filter(x=>x.nome.trim()).map(x=>{
+        const validUnidade=uRows.find(u=>u.id===x.unidade_id);
+        const validDiretoria=dRows.find(d=>d.id===x.diretoria_id);
+        return{id:x.id,nome:x.nome,unidade_id:validUnidade?x.unidade_id:null,diretoria_id:validDiretoria?x.diretoria_id:null};
+      });
+      if(aRows.length){const{error:eA}=await supabaseClient.from('areas').upsert(aRows,{onConflict:'id'});if(eA)throw new Error('Areas: '+eA.message);}
       const rmA=state.areas.filter(x=>!aRows.find(y=>y.id===x.id)).map(x=>x.id);if(rmA.length){const{error:eRA}=await supabaseClient.from('areas').delete().in('id',rmA);if(eRA)throw new Error('Remover areas: '+eRA.message);}
       // Colaboradores agora são gerenciados diretamente na tabela (não fazem parte deste rascunho)
       if(state.configDraft){const cfgRows=[{chave:'peso_conforme',valor:String(state.configDraft.peso_conforme),descricao:'Pontuação Conforme'},{chave:'peso_om',valor:String(state.configDraft.peso_om),descricao:'Pontuação OM'},{chave:'peso_nc',valor:String(state.configDraft.peso_nc),descricao:'Pontuação NC'},{chave:'whatsapp_ssma',valor:state.configDraft.whatsapp_ssma||'',descricao:'WhatsApp SSMA'}];await supabaseClient.from('configuracoes').upsert(cfgRows,{onConflict:'chave'});state.config=await loadConfig();}
