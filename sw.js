@@ -2,7 +2,7 @@
    Service Worker — Auditoria SSMA
    Versão: 4.1 — atualizar CACHE_NAME ao publicar mudanças
    ============================================================ */
-const CACHE_NAME = 'auditoria-ssma-v6';
+const CACHE_NAME = 'auditoria-ssma-v7';
 
 const LOCAL_FILES = [
   './',
