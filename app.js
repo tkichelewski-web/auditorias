@@ -378,6 +378,34 @@ function render(){
 function filteredAuditIndex(){return state.auditIndex.filter(a=>{if(state.filterUnidade!=='todos'&&a.unidadeId!==state.filterUnidade)return false;if(state.filterDiretoria!=='todas'&&a.diretoriaId!==state.filterDiretoria)return false;if(state.filterArea!=='todas'&&a.areaId!==state.filterArea)return false;if(state.filterFormulario!=='todos'&&a.formularioId!==state.filterFormulario)return false;if(state.filterSearch){const q=state.filterSearch.toLowerCase();if(!(a.codigo+a.areaNome+a.unidadeNome+a.formularioNome+a.diretoriaNome).toLowerCase().includes(q))return false;}return true;});}
 function kpiData(){const l=state.auditIndex.filter(a=>!a._offline),t=l.length;if(!t)return{total:0,media:0,excelente:0,atencao:0};return{total:t,media:Math.round(l.reduce((s,a)=>s+(a.resultado||0),0)/t*10)/10,excelente:l.filter(a=>a.classificacao==='Excelente').length,atencao:l.filter(a=>a.classificacao==='Atenção').length};}
 function overdueBanner(){const today=new Date().toISOString().slice(0,10);const n=state.acoesIndex.filter(p=>p.status!=='concluido'&&p.prazo&&p.prazo<today).length;const m=state.acoesIndex.filter(p=>p.statusNegociacao==='gestor_proposto').length;const parts=[];if(n)parts.push(`⚠ ${n} plano(s) com prazo vencido`);if(m)parts.push(`📬 ${m} proposta(s) de prazo aguardando aprovação`);return parts.length?`<button class="overdue-banner" onclick="App.goAcoes()">${parts.join('  ·  ')} — clique para ver</button>`:'';}
+
+function painelBreakdown(){
+  const list=state.auditIndex.filter(a=>!a._offline);
+  const byUnidade={},byDiretoria={};
+  list.forEach(a=>{
+    const un=a.unidadeNome||'—';
+    if(!byUnidade[un])byUnidade[un]={nome:un,n:0,soma:0,nc:0,om:0};
+    byUnidade[un].n++;byUnidade[un].soma+=a.resultado||0;byUnidade[un].nc+=a.totalNc||0;byUnidade[un].om+=a.totalOm||0;
+    const dn=a.diretoriaNome||'Sem diretoria';
+    if(!byDiretoria[dn])byDiretoria[dn]={nome:dn,n:0,soma:0,nc:0,om:0};
+    byDiretoria[dn].n++;byDiretoria[dn].soma+=a.resultado||0;byDiretoria[dn].nc+=a.totalNc||0;byDiretoria[dn].om+=a.totalOm||0;
+  });
+  const fmt=obj=>Object.values(obj).map(x=>({...x,media:x.n>0?Math.round(x.soma/x.n):0})).sort((a,b)=>b.n-a.n);
+  return{unidades:fmt(byUnidade),diretorias:fmt(byDiretoria)};
+}
+function breakdownCardHtml(title,icon,items){
+  if(!items.length)return`<div class="panel"><div class="panel__pad"><h3 style="font-weight:700;font-size:.95rem;color:var(--brand);margin:0 0 6px;">${icon} ${title}</h3><p style="color:var(--ink-soft);font-size:.83rem;margin:0;">Sem dados ainda.</p></div></div>`;
+  const max=Math.max(...items.map(x=>x.media),1);
+  return`<div class="panel"><div class="panel__pad">
+    <h3 style="font-weight:700;font-size:.95rem;color:var(--brand);margin:0 0 12px;">${icon} ${title}</h3>
+    ${items.map(x=>{const cl=classify(x.media);const pct=max>0?x.media/max*100:0;return`<div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:.83rem;margin-bottom:3px;"><span>${esc(x.nome)}</span><span style="font-family:var(--mono);font-weight:700;color:${cl.color};">${x.media}%</span></div>
+      <div style="background:var(--paper);border-radius:4px;height:7px;"><div style="background:${cl.color};border-radius:4px;height:7px;width:${pct.toFixed(1)}%;"></div></div>
+      <div style="font-size:.7rem;color:var(--ink-soft);margin-top:2px;">${x.n} auditoria(s)${x.nc?` · ${x.nc} NC`:''}${x.om?` · ${x.om} OM`:''}</div>
+    </div>`;}).join('')}
+  </div></div>`;
+}
+
 function dashboardHtml(){
   const k=kpiData();
   const uOpts=state.unidades.map(u=>`<option value="${u.id}" ${state.filterUnidade===u.id?'selected':''}>${esc(u.nome)}</option>`).join('');
@@ -391,6 +419,9 @@ function dashboardHtml(){
       <div class="kpi"><div class="kpi__value">${k.media}%</div><div class="kpi__label">Resultado médio</div></div>
       <div class="kpi"><div class="kpi__value">${k.excelente}</div><div class="kpi__label">Excelentes</div></div>
       <div class="kpi"><div class="kpi__value">${k.atencao}</div><div class="kpi__label">Em atenção</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      ${(()=>{const bd=painelBreakdown();return breakdownCardHtml('Resultado por Unidade','🏭',bd.unidades)+breakdownCardHtml('Resultado por Diretoria','🏢',bd.diretorias);})()}
     </div>
     <div class="chart-section">
       <div class="chart-section__header">
