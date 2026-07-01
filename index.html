@@ -15,29 +15,49 @@
 <body>
 
 <div class="hazard"></div>
-<div class="topbar">
-  <div class="topbar__inner">
-    <div>
-      <p class="brand__eyebrow">Usina Santa Adélia — SSMA</p>
-      <h1 class="brand__title">Auditoria Interna</h1>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-      <div id="online-status"></div>
-      <nav class="nav" id="nav">
-        <button class="nav__btn" data-nav="dashboard"   onclick="App.goDashboard()">Painel</button>
-        <button class="nav__btn" data-nav="agenda"      onclick="App.goAgenda()">Agenda</button>
-        <button class="nav__btn" data-nav="form"        onclick="App.goNewAudit()">Nova Auditoria</button>
-        <button class="nav__btn" data-nav="acoes"       onclick="App.goAcoes()">Planos de Ação</button>
-        <button class="nav__btn" data-nav="analise"     onclick="App.goAnalise()">Análise</button>
-        <button class="nav__btn" data-nav="formularios" onclick="App.goFormularios()">Formulários</button>
-        <button class="nav__btn" data-nav="cadastros"   onclick="App.goCadastros()">Cadastros</button>
-      </nav>
-    </div>
-  </div>
-</div>
 
-<div class="shell" id="app">
-  <div class="loading">Carregando…</div>
+<div class="app-shell">
+
+  <!-- Sidebar (persistente — nunca é re-renderizada pelo router) -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar__brand">
+      <img src="icon.svg" alt="" class="sidebar__logo">
+      <div>
+        <p class="brand__eyebrow">Usina Santa Adélia</p>
+        <p class="sidebar__brand-name">Plataforma SSMA</p>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav__btn" data-nav="dashboard"   onclick="App.goDashboard()"><span class="nav__icon">📊</span> Painel</button>
+      <button class="nav__btn" data-nav="form"        onclick="App.goNewAudit()"><span class="nav__icon">📋</span> Nova Auditoria</button>
+      <button class="nav__btn" data-nav="agenda"      onclick="App.goAgenda()"><span class="nav__icon">📅</span> Agenda</button>
+      <button class="nav__btn" data-nav="acoes"       onclick="App.goAcoes()"><span class="nav__icon">⚠️</span> Planos de Ação</button>
+      <button class="nav__btn" data-nav="analise"     onclick="App.goAnalise()"><span class="nav__icon">📈</span> Análise</button>
+      <button class="nav__btn" data-nav="cadastros"   onclick="App.goCadastros()"><span class="nav__icon">👥</span> Cadastros</button>
+      <button class="nav__btn" data-nav="formularios" onclick="App.goFormularios()"><span class="nav__icon">⚙️</span> Formulários</button>
+    </nav>
+    <div class="sidebar__footer" id="online-status"></div>
+  </aside>
+
+  <!-- Backdrop do drawer mobile -->
+  <div class="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
+  <!-- Coluna principal: topbar fixa + conteúdo dinâmico -->
+  <div class="main-col">
+    <div class="topbar">
+      <div class="topbar__inner">
+        <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Abrir menu">☰</button>
+        <h1 class="brand__title" id="page-title">Painel</h1>
+        <div class="topbar__spacer"></div>
+        <div class="topbar__user">👤 Equipe SSMA</div>
+      </div>
+    </div>
+
+    <main class="shell" id="app">
+      <div class="loading">Carregando…</div>
+    </main>
+  </div>
+
 </div>
 
 <!-- Dexie (IndexedDB wrapper para armazenamento offline) -->
@@ -45,6 +65,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
 <script src="supabaseClient.js"></script>
+<script src="router.js"></script>
 <script src="app.js"></script>
 
 <script>
@@ -59,4 +80,3 @@
 </script>
 </body>
 </html>
-
