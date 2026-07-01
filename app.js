@@ -56,7 +56,7 @@ const state={
   configDraft:{peso_conforme:'1',peso_om:'0.5',peso_nc:'-1',whatsapp_ssma:''},
   cadastroTab:'unidades',
   filterUnidade:'todos',filterDiretoria:'todas',filterArea:'todas',filterFormulario:'todos',filterSearch:'',
-  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,filterAnaliseUnidade:'todos',filterAnaliseDiretoria:'todas',filterAnalisePeriodo:'todos',colabSearch:'',colabFilterUnidade:'todos',colabFilterDiretoria:'todas',colabFilterArea:'todas',colabFilterSituacao:'todos',colabShowLimit:150,colabEditing:null,agendaMonth:new Date().toISOString().slice(0,7),agendamentos:[],agendaLoading:false,agendaFilterUnidade:'todos',agendaEditing:null,agendaDayView:null,
+  filterAcaoStatus:'todos',filterAcaoUnidade:'todos',filterAcaoDiretoria:'todas',filterAcaoArea:'todas',chartAreaId:'',analiseData:null,analiseLoading:false,filterAnaliseUnidade:'todos',filterAnaliseDiretoria:'todas',filterAnalisePeriodo:'todos',colabSearch:'',colabFilterUnidade:'todos',colabFilterDiretoria:'todas',colabFilterArea:'todas',colabFilterSituacao:'todos',colabShowLimit:150,colabEditing:null,agendaMonth:new Date().toISOString().slice(0,7),agendamentos:[],agendaLoading:false,agendaFilterUnidade:'todos',agendaEditing:null,agendaDayView:null,agendaAuditorQ:'',
 };
 
 /* ====== Online/Offline ====== */
@@ -100,7 +100,15 @@ function fmtDate(iso){if(!iso)return'—';const p=String(iso).slice(0,10).split(
 function newUUID(){return crypto&&crypto.randomUUID?crypto.randomUUID():'id_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);}
 function genId(){return'new_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function groupByCategoria(list){const o=[],m={};list.forEach(it=>{if(!m[it.categoria]){m[it.categoria]=[];o.push(it.categoria);}m[it.categoria].push(it);});return o.map(c=>({categoria:c,itens:m[c]}));}
-function setActiveNav(view){const k=view==='formulario-editor'?'formularios':view;document.querySelectorAll('#nav .nav__btn').forEach(b=>b.classList.toggle('is-active',b.dataset.nav===k));}
+function toggleSidebar(){document.body.classList.toggle('sidebar-open');}
+const NAV_TITLES={dashboard:'Painel',agenda:'Agenda',form:'Auditoria','formulario-editor':'Formulário',acoes:'Planos de Ação',analise:'Análise',formularios:'Formulários',cadastros:'Cadastros'};
+function setActiveNav(view){
+  const k=view==='formulario-editor'?'formularios':view;
+  document.querySelectorAll('#nav .nav__btn').forEach(b=>b.classList.toggle('is-active',b.dataset.nav===k));
+  const titleEl=document.getElementById('page-title');
+  if(titleEl)titleEl.textContent=NAV_TITLES[view]||'Auditoria Interna';
+  document.body.classList.remove('sidebar-open');
+}
 async function compressToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height;if(w>1280){h=Math.round(h*1280/w);w=1280;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);res(c.toDataURL('image/jpeg',.72));};img.onerror=rej;img.src=e.target.result;};r.onerror=rej;r.readAsDataURL(file);});}
 
 function computeScore(audit,checklist){
@@ -519,6 +527,53 @@ function filteredAuditIndex(){return state.auditIndex.filter(a=>{if(state.filter
 function kpiData(){const l=state.auditIndex.filter(a=>!a._offline),t=l.length;if(!t)return{total:0,media:0,excelente:0,atencao:0};return{total:t,media:Math.round(l.reduce((s,a)=>s+(a.resultado||0),0)/t*10)/10,excelente:l.filter(a=>a.classificacao==='Excelente').length,atencao:l.filter(a=>a.classificacao==='Atenção').length};}
 function overdueBanner(){const today=new Date().toISOString().slice(0,10);const n=state.acoesIndex.filter(p=>p.status!=='concluido'&&p.prazo&&p.prazo<today).length;const m=state.acoesIndex.filter(p=>p.statusNegociacao==='gestor_proposto').length;const parts=[];if(n)parts.push(`⚠ ${n} plano(s) com prazo vencido`);if(m)parts.push(`📬 ${m} proposta(s) de prazo aguardando aprovação`);return parts.length?`<button class="overdue-banner" onclick="App.goAcoes()">${parts.join('  ·  ')} — clique para ver</button>`:'';}
 
+/* ====== Exportação para planilha ====== */
+function csvEscape(v){return'"'+String(v==null?'':v).replace(/"/g,'""')+'"';}
+function downloadCSV(rows,filename){
+  const csv=rows.map(r=>r.map(csvEscape).join(';')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function exportAuditorias(){
+  const list=filteredAuditIndex().filter(a=>!a._offline);
+  if(!list.length){alert('Nenhuma auditoria para exportar com os filtros atuais.');return;}
+  const header=['Código','Data','Unidade','Diretoria','Área/Local','Turno','Formulário','Resultado (%)','Classificação','Conforme','NC','OM','N/A'];
+  const rows=list.map(a=>[a.codigo,a.data,a.unidadeNome,a.diretoriaNome,a.areaNome,a.turnoNome||'',a.formularioNome,a.resultado,a.classificacao,a.totalConforme||0,a.totalNc,a.totalOm,a.totalNa||0]);
+  downloadCSV([header,...rows],`auditorias_${new Date().toISOString().slice(0,10)}.csv`);
+}
+async function exportAcoesPlanilha(){
+  let list=state.acoesIndex;
+  if(!list.length){alert('Nenhum plano de ação para exportar.');return;}
+  const header=['Auditoria','Data','Unidade','Área','Item auditado','Ação proposta','Responsável','Prazo SSMA','Prazo proposto gestor','Status','Status negociação'];
+  const negLabel={'aguardando_gestor':'Aguardando gestor','gestor_proposto':'Gestor propôs prazo','ssma_aprovou':'SSMA aprovou','ssma_negociou':'SSMA negociou'};
+  const stLabel={'pendente':'Pendente','em_andamento':'Em andamento','concluido':'Concluído'};
+  const rows=list.map(p=>[p.codigo,p.data,p.unidadeNome,p.areaNome,p.itemTexto,p.acao,p.responsavel,p.prazo||'',p.prazoGestor||'',stLabel[p.status]||p.status,negLabel[p.statusNegociacao]||p.statusNegociacao]);
+  downloadCSV([header,...rows],`planos_acao_${new Date().toISOString().slice(0,10)}.csv`);
+}
+async function exportAuditoriasCompleto(){
+  // Versão detalhada: uma linha por ITEM respondido (não por auditoria)
+  const list=filteredAuditIndex().filter(a=>!a._offline);
+  if(!list.length){alert('Nenhuma auditoria para exportar.');return;}
+  showToast('Preparando exportação detalhada…','ok');
+  const header=['Código','Data','Unidade','Diretoria','Área','Formulário','Categoria','Item','Resposta','Observação','Ação','Responsável','Prazo','Status plano'];
+  const rows=[header];
+  const PAGE=50;
+  for(let i=0;i<list.length;i+=PAGE){
+    const batch=list.slice(i,i+PAGE);
+    await Promise.all(batch.map(async a=>{
+      try{
+        const{data:itens}=await supabaseClient.from('audit_itens').select('checklist_item_texto,checklist_item_categoria,status,observacao,plano_acao_acao,plano_acao_responsavel,plano_acao_prazo,plano_acao_status').eq('audit_id',a.id);
+        const statusMap={'conforme':'Conforme','nao_conforme':'Não Conforme','na':'N/A','oportunidade_melhoria':'Oport. Melhoria'};
+        (itens||[]).forEach(it=>{rows.push([a.codigo,a.data,a.unidadeNome,a.diretoriaNome,a.areaNome,a.formularioNome,it.checklist_item_categoria,it.checklist_item_texto,statusMap[it.status]||it.status||'',it.observacao||'',it.plano_acao_acao||'',it.plano_acao_responsavel||'',it.plano_acao_prazo||'',it.plano_acao_status||'']);});
+      }catch(e){}
+    }));
+  }
+  downloadCSV(rows,`auditorias_detalhado_${new Date().toISOString().slice(0,10)}.csv`);
+  showToast(`✅ ${rows.length-1} linhas exportadas!`,'ok');
+}
+
 function painelBreakdown(){
   const list=state.auditIndex.filter(a=>!a._offline);
   const byUnidade={},byDiretoria={};
@@ -576,7 +631,16 @@ function dashboardHtml(){
       <select class="flt-select" onchange="App.setFA(this.value)"><option value="todas">Todas áreas</option>${aOpts}</select>
       <select class="flt-select" onchange="App.setFF(this.value)"><option value="todos">Todos formulários</option>${fOpts}</select>
       <input class="search" placeholder="Buscar…" value="${esc(state.filterSearch)}" oninput="App.setFS(this.value)">
-      <button class="btn-primary" onclick="App.goNewAudit()">+ Nova Auditoria</button>
+      <div style="display:flex;gap:6px;flex:none;">
+        <div style="position:relative;display:inline-block;" id="export-menu-container">
+          <button class="btn-secondary" onclick="App.toggleExportMenu()" title="Exportar para planilha">📥 Exportar</button>
+          <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);z-index:100;min-width:220px;padding:6px;">
+            <button class="btn-ghost" style="display:block;width:100%;text-align:left;padding:8px 12px;" onclick="App.exportAuditorias()">📊 Resumo de auditorias (.csv)</button>
+            <button class="btn-ghost" style="display:block;width:100%;text-align:left;padding:8px 12px;" onclick="App.exportAuditoriasCompleto()">📋 Auditorias com itens (.csv)</button>
+          </div>
+        </div>
+        <button class="btn-primary" onclick="App.goNewAudit()">+ Nova Auditoria</button>
+      </div>
     </div>
     <div class="audit-list" id="audit-list">${auditListHtml()}</div>`;
 }
@@ -1067,21 +1131,59 @@ function agendaDayPanelHtml(withStatus){
   const items=withStatus.filter(ag=>ag.data===dateStr);
   const[y,m,d]=dateStr.split('-');
   const statusLabel={agendado:'Agendado',realizado:'Realizado',atrasado:'Atrasado',cancelado:'Cancelado'};
-  return`<div class="panel" style="margin-bottom:18px;"><div class="panel__pad">
+  return`<div class="panel" style="margin-bottom:18px;border-color:var(--brand);"><div class="panel__pad">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
       <h4 style="margin:0;color:var(--brand);">📅 ${d}/${m}/${y}</h4>
       <button class="btn-ghost" style="margin-left:auto;" onclick="App.agendaCloseDayView()">Fechar</button>
     </div>
-    ${items.length?items.map(ag=>`<div class="audit-card" style="cursor:pointer;margin-bottom:8px;" onclick="App.agendaOpenEdit('${ag.id}')">
-      <div class="audit-card__body">
-        <div class="audit-card__top"><span class="audit-card__area">${esc(ag.areaNome)}</span><span class="tag">${esc(ag.unidadeNome)}</span><span class="cal-chip cal-chip--${ag._status}">${statusLabel[ag._status]}</span></div>
-        <div class="audit-card__meta">👤 ${esc(ag.auditorNome||'sem auditor definido')}${ag.turnoNome?' · '+esc(ag.turnoNome):''}${ag.formularioNome?' · '+esc(ag.formularioNome):''}</div>
+    ${items.length?items.map(ag=>`<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:10px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px;">
+            <span style="font-weight:700;font-size:.95rem;color:var(--brand);">${esc(ag.areaNome)}</span>
+            <span class="tag">${esc(ag.unidadeNome)}</span>
+            <span class="cal-chip cal-chip--${ag._status}">${statusLabel[ag._status]}</span>
+          </div>
+          <div style="font-size:.83rem;color:var(--ink-soft);">
+            👤 ${esc(ag.auditorNome||'sem auditor')}
+            ${ag.turnoNome?` · ⏱ ${esc(ag.turnoNome)}`:''}
+            ${ag.formularioNome?` · 📋 ${esc(ag.formularioNome)}`:''}
+          </div>
+          ${ag.observacao?`<div style="font-size:.78rem;color:var(--ink-soft);margin-top:4px;font-style:italic;">${esc(ag.observacao)}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex:none;">
+          ${ag._status==='realizado'
+            ?`<button class="btn-secondary" style="font-size:.82rem;" onclick="App.goEditAudit('${ag.auditId}')">📋 Ver auditoria</button>`
+            :ag._status==='cancelado'
+            ?`<button class="btn-ghost" style="font-size:.82rem;" onclick="App.agendaOpenEdit('${ag.id}')">✏️ Editar</button>`
+            :`<button class="btn-primary" style="font-size:.82rem;" onclick="App.agendaStartAudit('${ag.id}')">▶ Realizar auditoria</button>
+             <button class="btn-ghost" style="font-size:.82rem;" onclick="App.agendaOpenEdit('${ag.id}')">✏️ Editar</button>`}
+        </div>
       </div>
     </div>`).join(''):'<p style="color:var(--ink-soft);font-size:.86rem;">Nenhum agendamento neste dia ainda.</p>'}
     <button class="btn-secondary" style="margin-top:6px;" onclick="App.agendaOpenNew('${dateStr}')">+ Agendar novo neste dia</button>
   </div></div>`;
 }
 
+function agendaAuditorDropdownHtml(){
+  const q=(state.agendaAuditorQ||'').toLowerCase().trim();
+  if(!q||q.length<1)return'';
+  const matches=state.colaboradores.filter(c=>
+    c.nome.toLowerCase().includes(q)||(c.matricula||'').includes(q)
+  ).slice(0,12);
+  if(!matches.length)return'';
+  return`<div id="agenda-auditor-dropdown" style="position:absolute;z-index:200;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);width:100%;margin-top:2px;max-height:220px;overflow-y:auto;">
+    ${matches.map(c=>`<div
+      onclick="App.agendaSelectAuditor(this)"
+      data-nome="${esc(c.nome)}" data-mat="${esc(c.matricula||'')}"
+      style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:.86rem;"
+      onmousedown="event.preventDefault()">
+      <strong>${esc(c.nome)}</strong>
+      ${c.matricula?`<span style="color:var(--ink-soft);font-family:var(--mono);font-size:.75rem;margin-left:8px;">${esc(c.matricula)}</span>`:''}
+      ${c.cargo?`<span style="color:var(--ink-soft);font-size:.75rem;"> · ${esc(c.cargo)}</span>`:''}
+    </div>`).join('')}
+  </div>`;
+}
 function agendaEditPanelHtml(){
   const ag=state.agendaEditing;
   const isNew=!ag._existing;
@@ -1095,8 +1197,20 @@ function agendaEditPanelHtml(){
       <div class="field field--2"><label>Local/Área *</label><select onchange="App.agendaEditArea(this.value)"><option value="">—</option>${areasFilt.map(a=>`<option value="${a.id}" ${ag.areaId===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select></div>
       <div class="field field--2"><label>Turno</label><select onchange="App.agendaEditField('turnoId',this.value)"><option value="">—</option>${turnosFilt.map(t=>`<option value="${t.id}" ${ag.turnoId===t.id?'selected':''}>${esc(t.nome)}</option>`).join('')}</select></div>
       <div class="field field--2"><label>Formulário</label><select onchange="App.agendaEditFormulario(this.value)"><option value="">—</option>${state.formularios.map(f=>`<option value="${f.id}" ${ag.formularioId===f.id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></div>
-      <div class="field field--2"><label>Auditor responsável *</label><input type="text" list="dl-agenda-auditor" value="${esc(ag.auditorNome)}" placeholder="Nome" oninput="App.agendaEditField('auditorNome',this.value)" onchange="App.agendaAutoFillAuditor(this.value)"></div>
-      <datalist id="dl-agenda-auditor">${state.colaboradores.slice(0,500).map(c=>`<option value="${esc(c.nome)}">`).join('')}</datalist>
+      <div class="field field--1"><label>Matrícula do auditor</label>
+        <input type="text" id="agenda-mat-input" value="${esc(ag.auditorMatricula||'')}" placeholder="Matrícula"
+          oninput="App.agendaEditField('auditorMatricula',this.value)"
+          onchange="App.agendaFillByMat(this.value)">
+      </div>
+      <div class="field field--1"><label>Nome do auditor *</label>
+        <div style="position:relative;">
+          <input type="text" id="agenda-auditor-input" value="${esc(ag.auditorNome)}" placeholder="ou busque pelo nome…" autocomplete="off"
+            oninput="App.agendaAuditorSearch(this.value)"
+            onblur="setTimeout(()=>App.agendaAuditorBlur(),200)"
+            style="width:100%;">
+          ${agendaAuditorDropdownHtml()}
+        </div>
+      </div>
       <div class="field field--6"><label>Observação (opcional)</label><input type="text" value="${esc(ag.observacao||'')}" oninput="App.agendaEditField('observacao',this.value)"></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
@@ -1126,9 +1240,10 @@ function acoesHtml(){
       <div class="kpi"><div class="kpi__value">${aguardAprov}</div><div class="kpi__label">Aguard. aprovação</div></div>
       <div class="kpi"><div class="kpi__value">${co}</div><div class="kpi__label">Concluídos</div></div>
     </div>
-    <div class="filterbar">
+    <div class="filterbar" style="justify-content:space-between;">
       <div class="tabs">${[['todos','Todos'],['pendente','Pendentes'],['em_andamento','Em andamento'],['concluido','Concluídos'],['atrasado','Atrasados'],['aguard_aprov','Aguard. aprovação']].map(([v,l])=>`<button class="tabs__btn ${state.filterAcaoStatus===v?'is-active':''}" onclick="App.setFAS('${v}')">${l}</button>`).join('')}</div>
       <select class="flt-select" onchange="App.setFAU(this.value)"><option value="todos">Todas unidades</option>${state.unidades.map(u=>`<option value="${u.id}" ${state.filterAcaoUnidade===u.id?'selected':''}>${esc(u.nome)}</option>`).join('')}</select>
+      <button class="btn-secondary" onclick="App.exportAcoes()" title="Exportar planos de ação">📥 Exportar</button>
       <select class="flt-select" onchange="App.setFAD(this.value)"><option value="todas">Todas diretorias</option>${(state.filterAcaoUnidade==='todos'?state.diretorias:state.diretorias.filter(d=>d.unidade_id===state.filterAcaoUnidade)).map(d=>`<option value="${d.id}" ${state.filterAcaoDiretoria===d.id?'selected':''}>${esc(d.nome)}</option>`).join('')}</select>
       <select class="flt-select" onchange="App.setFAA(this.value)"><option value="todas">Todos locais</option>${(state.filterAcaoUnidade==='todos'?state.areas:state.areas.filter(a=>a.unidade_id===state.filterAcaoUnidade)).map(a=>`<option value="${a.id}" ${state.filterAcaoArea===a.id?'selected':''}>${esc(a.nome)}</option>`).join('')}</select>
     </div>
@@ -1272,11 +1387,12 @@ const App={
       document.getElementById('app').innerHTML=`<div class="empty"><strong>Erro ao conectar</strong>Confira config.js e se rodou o schema.sql.</div>`;return;
     }
     if(state.isOnline&&state.pendingCount>0)syncPendingAudits();
-    state.view='dashboard';render();
+    if(!Router.resolve())Router.navigate('/dashboard',{replace:true});
   },
 
   async _showManagerReport(token){
-    // Página simplificada para o gestor — sem nav
+    // Página simplificada para o gestor — sem sidebar, sem nav interno
+    document.body.classList.add('manager-view');
     document.querySelector('.topbar').innerHTML=`<div class="topbar__inner" style="justify-content:flex-start;"><div><p class="brand__eyebrow">Usina Santa Adélia — SSMA</p><h1 class="brand__title">Relatório de Auditoria</h1></div></div>`;
     const root=document.getElementById('app');
     root.innerHTML='<div class="loading">Carregando relatório…</div>';
@@ -1288,37 +1404,51 @@ const App={
     }catch(e){console.error(e);root.innerHTML=`<div class="empty"><strong>Erro ao carregar</strong>Verifique sua conexão.</div>`;}
   },
 
-  goDashboard(){state.editingAudit=null;state.view='dashboard';render();},
+  goDashboard(){state.editingAudit=null;state.view='dashboard';render();Router.setSilent('/dashboard');},
+  toggleExportMenu(){
+    const m=document.getElementById('export-menu');
+    if(!m)return;
+    const open=m.style.display!=='none';
+    m.style.display=open?'none':'block';
+    if(!open){
+      // Fecha ao clicar fora
+      const close=e=>{if(!document.getElementById('export-menu-container')?.contains(e.target)){m.style.display='none';document.removeEventListener('click',close);}};
+      setTimeout(()=>document.addEventListener('click',close),10);
+    }
+  },
+  exportAuditorias(){exportAuditorias();document.getElementById('export-menu').style.display='none';},
+  async exportAuditoriasCompleto(){await exportAuditoriasCompleto();document.getElementById('export-menu').style.display='none';},
+  async exportAcoes(){await exportAcoesPlanilha();},
 
   goNewAudit(){
     state.currentChecklist=[];
     state.editingAudit={id:newUUID(),persisted:false,_offline:false,codigo:'',token_gestor:null,formularioId:null,formularioNome:'',unidadeId:null,unidadeNome:'',unidadeSigla:'',areaId:null,areaNome:'',diretoriaId:null,diretoriaNome:'',turnoId:null,turnoNome:'',data:new Date().toISOString().slice(0,10),auditores:[{nome:'',matricula:''}],auditados:[{nome:'',matricula:''}],observacaoGeral:'',itens:{}};
     if(state.unidades.length===1)App.setAuditUnidade(state.unidades[0].id);
     if(state.formularios.length===1)App.setFormulario(state.formularios[0].id);
-    state.view='form';render();
+    state.view='form';render();Router.setSilent('/auditoria/nova');
   },
 
   async goEditAudit(id){
     document.getElementById('app').innerHTML='<div class="loading">Carregando auditoria…</div>';
-    const audit=await loadAuditFull(id);if(!audit){alert('Não foi possível carregar.');state.view='dashboard';render();return;}
+    const audit=await loadAuditFull(id);if(!audit){alert('Não foi possível carregar.');App.goDashboard();return;}
     state.currentChecklist=audit.checklistFromHistory;state.editingAudit=audit;
     // Load opcoes from formulario for correct response buttons
     if(audit.formularioId){try{const fOp=await loadFormularioWithItems(audit.formularioId);state.currentOpcoes=fOp&&fOp.opcoes?[...fOp.opcoes]:[...DEFAULT_OPCOES];}catch(e){state.currentOpcoes=[...DEFAULT_OPCOES];}}
     else{state.currentOpcoes=[...DEFAULT_OPCOES];}
-    state.view='form';render();
+    state.view='form';render();Router.setSilent('/auditoria/'+id);
   },
 
-  async goFormularios(){document.getElementById('app').innerHTML='<div class="loading">Carregando…</div>';state.formularios=await loadFormularios();state.view='formularios';render();},
-  goNewFormulario(){if(!state.isOnline){alert('Requer conexão com a internet.');return;}state.editingFormulario={id:null,nome:'',descricao:'',opcoes:[...DEFAULT_OPCOES],itens:[]};state.view='formulario-editor';render();},
-  async goEditFormulario(id){document.getElementById('app').innerHTML='<div class="loading">Carregando…</div>';const f=await loadFormularioWithItems(id);if(!f){state.view='formularios';render();return;}state.editingFormulario={...f,opcoes:f.opcoes||[...DEFAULT_OPCOES]};state.view='formulario-editor';render();},
+  async goFormularios(){document.getElementById('app').innerHTML='<div class="loading">Carregando…</div>';state.formularios=await loadFormularios();state.view='formularios';render();Router.setSilent('/formularios');},
+  goNewFormulario(){if(!state.isOnline){alert('Requer conexão com a internet.');return;}state.editingFormulario={id:null,nome:'',descricao:'',opcoes:[...DEFAULT_OPCOES],itens:[]};state.view='formulario-editor';render();Router.setSilent('/formularios/novo');},
+  async goEditFormulario(id){document.getElementById('app').innerHTML='<div class="loading">Carregando…</div>';const f=await loadFormularioWithItems(id);if(!f){App.goFormularios();return;}state.editingFormulario={...f,opcoes:f.opcoes||[...DEFAULT_OPCOES]};state.view='formulario-editor';render();Router.setSilent('/formularios/'+id);},
 
-  goCadastros(){
+  goCadastros(tab){
     state.cadastroDraft={unidades:JSON.parse(JSON.stringify(state.unidades)),diretorias:JSON.parse(JSON.stringify(state.diretorias)),turnos:JSON.parse(JSON.stringify(state.turnos)),areas:JSON.parse(JSON.stringify(state.areas)),colaboradores:[]};
-    state.configDraft={...state.config};state.cadastroTab='unidades';state.view='cadastros';render();
+    state.configDraft={...state.config};state.cadastroTab=tab||'unidades';state.view='cadastros';render();Router.setSilent('/cadastros/'+state.cadastroTab);
   },
-  goAcoes(){state.view='acoes';render();},
+  goAcoes(){state.view='acoes';render();Router.setSilent('/acoes');},
   async goAgenda(){
-    state.view='agenda';state.agendaLoading=true;state.agendaEditing=null;render();
+    state.view='agenda';state.agendaLoading=true;state.agendaEditing=null;render();Router.setSilent('/agenda');
     try{state.agendamentos=await loadAgendamentos(state.agendaMonth);}catch(e){console.error(e);state.agendamentos=[];}
     state.agendaLoading=false;render();
   },
@@ -1338,6 +1468,41 @@ const App={
     else{App.agendaOpenNew(dateStr);}
   },
   agendaCloseDayView(){state.agendaDayView=null;render();},
+  async agendaStartAudit(agendaId){
+    const ag=state.agendamentos.find(a=>a.id===agendaId);
+    if(!ag)return;
+    // Se já realizado, vai direto pra auditoria vinculada
+    if(ag.auditId){App.goEditAudit(ag.auditId);return;}
+    // Fecha visão do dia e muda para o formulário de auditoria pré-preenchido
+    state.agendaDayView=null;
+    state.currentChecklist=[];
+    const unidade=state.unidades.find(u=>u.id===ag.unidadeId);
+    state.editingAudit={
+      id:newUUID(),persisted:false,_offline:false,
+      _agendaId:agendaId, // guarda para vincular automaticamente ao salvar
+      codigo:'',token_gestor:null,
+      formularioId:ag.formularioId||null,formularioNome:ag.formularioNome||'',
+      unidadeId:ag.unidadeId||null,unidadeNome:ag.unidadeNome||'',
+      unidadeSigla:unidade?.sigla||'',
+      areaId:ag.areaId||null,areaNome:ag.areaNome||'',
+      diretoriaId:ag.diretoriaId||null,diretoriaNome:ag.diretoriaNome||'',
+      turnoId:ag.turnoId||null,turnoNome:ag.turnoNome||'',
+      data:ag.data,
+      auditores:ag.auditorNome?[{nome:ag.auditorNome,matricula:ag.auditorMatricula||''}]:[{nome:'',matricula:''}],
+      auditados:[{nome:'',matricula:''}],
+      observacaoGeral:'',itens:{}
+    };
+    // Carrega checklist do formulário escolhido
+    if(ag.formularioId){
+      try{
+        const items=await loadChecklistForFormulario(ag.formularioId);
+        state.currentChecklist=items;
+        state.editingAudit.itens=emptyItens(items);
+      }catch(e){console.warn('Checklist load failed',e);}
+    }
+    state.view='form';render();
+    showToast('📋 Formulário pré-preenchido com os dados do agendamento','ok');
+  },
   agendaOpenEdit(id){const ag=state.agendamentos.find(a=>a.id===id);if(!ag)return;state.agendaDayView=null;state.agendaEditing={...ag,_existing:true};render();},
   agendaCancelEdit(){state.agendaEditing=null;render();},
   agendaEditField(key,value){if(state.agendaEditing)state.agendaEditing[key]=value;},
@@ -1345,6 +1510,38 @@ const App={
   agendaEditArea(aid){const a=state.areas.find(x=>x.id===aid);if(!state.agendaEditing)return;state.agendaEditing.areaId=aid;state.agendaEditing.areaNome=a?a.nome:'';state.agendaEditing.diretoriaId=a?.diretoria_id||'';state.agendaEditing.diretoriaNome=a?.diretoria_nome||'';},
   agendaEditFormulario(fid){const f=state.formularios.find(x=>x.id===fid);if(!state.agendaEditing)return;state.agendaEditing.formularioId=fid;state.agendaEditing.formularioNome=f?f.nome:'';},
   agendaAutoFillAuditor(nome){const c=state.colaboradores.find(x=>x.nome===nome);if(c&&state.agendaEditing)state.agendaEditing.auditorMatricula=c.matricula||'';},
+  agendaFillByMat(mat){
+    if(!mat.trim())return;
+    const c=state.colaboradores.find(x=>x.matricula&&x.matricula.trim()===mat.trim());
+    if(c&&state.agendaEditing){
+      state.agendaEditing.auditorNome=c.nome;
+      state.agendaEditing.auditorMatricula=mat.trim();
+      const input=document.getElementById('agenda-auditor-input');
+      if(input)input.value=c.nome;
+    }
+  },
+  agendaAuditorSearch(val){
+    state.agendaAuditorQ=val;
+    if(state.agendaEditing)state.agendaEditing.auditorNome=val;
+    // Atualiza apenas o dropdown sem re-renderizar o form todo
+    const container=document.getElementById('agenda-auditor-input')?.parentElement;
+    if(container){
+      const old=document.getElementById('agenda-auditor-dropdown');if(old)old.remove();
+      container.insertAdjacentHTML('beforeend',agendaAuditorDropdownHtml());
+    }
+  },
+  agendaSelectAuditor(el){
+    const nome=el.dataset.nome,mat=el.dataset.mat;
+    if(state.agendaEditing){state.agendaEditing.auditorNome=nome;state.agendaEditing.auditorMatricula=mat;}
+    state.agendaAuditorQ='';
+    const input=document.getElementById('agenda-auditor-input');if(input)input.value=nome;
+    const matInput=document.getElementById('agenda-mat-input');if(matInput)matInput.value=mat;
+    const dd=document.getElementById('agenda-auditor-dropdown');if(dd)dd.remove();
+  },
+  agendaAuditorBlur(){
+    state.agendaAuditorQ='';
+    const dd=document.getElementById('agenda-auditor-dropdown');if(dd)dd.remove();
+  },
   agendaToggleCancelado(){if(!state.agendaEditing)return;state.agendaEditing.status=state.agendaEditing.status==='cancelado'?'agendado':'cancelado';render();},
   async agendaSave(){
     const ag=state.agendaEditing;
@@ -1365,7 +1562,7 @@ const App={
     render();showToast('Agendamento removido.','ok');
   },
   async goAnalise(){
-    state.analiseData=null;state.analiseLoading=true;state.view='analise';render();
+    state.analiseData=null;state.analiseLoading=true;state.view='analise';render();Router.setSilent('/analise');
     try{state.analiseData=await loadAnaliseData();}catch(e){console.error(e);}
     state.analiseLoading=false;if(state.view==='analise')render();
   },
@@ -1466,7 +1663,20 @@ const App={
     const btn=document.querySelector('.score-footer .btn-primary');if(btn){btn.disabled=true;btn.textContent='Salvando…';}
     a.auditores=(a.auditores||[]).filter(p=>p.nome.trim());a.auditados=(a.auditados||[]).filter(p=>p.nome.trim());
     if(state.isOnline&&!a._offline){
-      try{if(!a.codigo||!a.persisted)a.codigo=await getNextCode(a.unidadeSigla,new Date().getFullYear());await saveAuditToDb(a,state.currentChecklist);try{await localDB.pendingAudits.delete(a.id);}catch(e){}a.persisted=true;a._offline=false;state.auditIndex=await loadAuditIndex();state.acoesIndex=await loadAcoesIndex();state.pendingCount=await localDB.pendingAudits.count().catch(()=>0);state.editingAudit=null;state.view='dashboard';render();}
+      try{
+        if(!a.codigo||!a.persisted)a.codigo=await getNextCode(a.unidadeSigla,new Date().getFullYear());
+        await saveAuditToDb(a,state.currentChecklist);
+        try{await localDB.pendingAudits.delete(a.id);}catch(e){}
+        // Se iniciado pela Agenda, vincula diretamente ao agendamento
+        if(a._agendaId){
+          try{await supabaseClient.from('agendamentos').update({audit_id:a.id}).eq('id',a._agendaId);}
+          catch(e){console.warn('Agenda link failed:',e);}
+        }
+        a.persisted=true;a._offline=false;
+        state.auditIndex=await loadAuditIndex();state.acoesIndex=await loadAcoesIndex();
+        state.pendingCount=await localDB.pendingAudits.count().catch(()=>0);
+        state.editingAudit=null;App.goDashboard();
+      }
       catch(e){console.error(e);alert('Não foi possível salvar. Salvando offline…');await this._saveOffline(a);}
     }else{await this._saveOffline(a);}
     if(btn){btn.disabled=false;btn.textContent='Salvar auditoria';}
@@ -1529,7 +1739,7 @@ const App={
   },
   async deleteFormulario(id){if(!confirm('Excluir este formulário?'))return;await supabaseClient.from('formularios').update({ativo:false}).eq('id',id);state.formularios=await loadFormularios();render();},
 
-  setCadastroTab(t){state.cadastroTab=t;render();},
+  setCadastroTab(t){state.cadastroTab=t;render();Router.setSilent('/cadastros/'+t);},
   // ===== Tabela de Colaboradores (independente do cadastroDraft) =====
   setColabSearch(v){state.colabSearch=v;state.colabShowLimit=150;render();},
   setColabFilterU(v){state.colabFilterUnidade=v;state.colabFilterDiretoria='todas';state.colabFilterArea='todas';state.colabShowLimit=150;render();},
@@ -1742,7 +1952,7 @@ const App={
     await Promise.all([cacheSet('unidades',u),cacheSet('diretorias',d),cacheSet('turnos',t),cacheSet('areas',a),cacheSet('colaboradores',c)]);
     if(btn){btn.disabled=false;btn.textContent='Salvar cadastros';}
     showToast('✅ Cadastros salvos com sucesso!','ok');
-    state.view='dashboard';render();
+    App.goDashboard();
   },
 
   async setAcaoStatus(rowId,status){if(!state.isOnline){alert('Requer internet.');return;}const{error}=await supabaseClient.from('audit_itens').update({plano_acao_status:status}).eq('id',rowId);if(error){alert('Não foi possível atualizar.');return;}state.acoesIndex=state.acoesIndex.map(p=>p.rowId===rowId?{...p,status}:p);render();}
@@ -1760,5 +1970,20 @@ async function submitManagerProposal(){
     document.getElementById('app').innerHTML=`<div style="max-width:480px;margin:60px auto;text-align:center;padding:20px;"><div style="font-size:4rem;">✅</div><h2 style="color:#07583B;margin-top:16px;">Proposta enviada!</h2><p style="color:#4A6357;line-height:1.6;">Os prazos propostos foram enviados para a equipe SSMA.<br>Entraremos em contato caso necessário.</p></div>`;
   }catch(e){console.error(e);alert('Erro ao enviar. Verifique sua conexão.');if(btn){btn.disabled=false;btn.textContent='Enviar proposta de prazos';}}
 }
+
+/* ====== Rotas ======
+   Cada rota chama a lógica de navegação que já existe em App.go*().
+   O Router só cuida da URL, deep-link e botão voltar/avançar. */
+Router.register('/dashboard',            ()=>App.goDashboard());
+Router.register('/auditoria/nova',       ()=>App.goNewAudit());
+Router.register('/auditoria/:id',        p=>App.goEditAudit(p.id));
+Router.register('/formularios',          ()=>App.goFormularios());
+Router.register('/formularios/novo',     ()=>App.goNewFormulario());
+Router.register('/formularios/:id',      p=>App.goEditFormulario(p.id));
+Router.register('/cadastros',            ()=>App.goCadastros());
+Router.register('/cadastros/:tab',       p=>App.goCadastros(p.tab));
+Router.register('/acoes',                ()=>App.goAcoes());
+Router.register('/analise',              ()=>App.goAnalise());
+Router.register('/agenda',               ()=>App.goAgenda());
 
 App.init();
