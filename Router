@@ -1,0 +1,84 @@
+/* ===========================================================
+   Router — Auditoria SSMA
+   Router funcional baseado em hash. Sem build step, sem framework.
+
+   Responsabilidades:
+   - Mapear rotas nomeadas (ex.: '/auditoria/:id') para handlers
+   - Refletir a navegação na URL (deep-link, compartilhamento, refresh)
+   - Suportar botão voltar/avançar do navegador (popstate)
+   - NÃO decide o que renderizar — apenas chama o handler registrado,
+     que continua sendo a lógica já existente em App.go*()
+   =========================================================== */
+const Router = (() => {
+  const routes = [];
+  let dispatching = false; // evita reentrância entre navigate() e popstate
+
+  function compile(path) {
+    const keys = [];
+    const pattern = '^' + path
+      .replace(/\/+$/, '')
+      .replace(/:[^/]+/g, seg => { keys.push(seg.slice(1)); return '([^/]+)'; })
+      + '/?$';
+    return { regex: new RegExp(pattern), keys };
+  }
+
+  /** Registra uma rota. handler(params) roda a lógica de navegação existente. */
+  function register(path, handler) {
+    const { regex, keys } = compile(path);
+    routes.push({ path, regex, keys, handler });
+  }
+
+  function currentPath() {
+    let h = location.hash.slice(1);
+    if (!h) return '/dashboard';
+    if (!h.startsWith('/')) h = '/' + h;
+    return h;
+  }
+
+  function match(path) {
+    for (const r of routes) {
+      const m = path.match(r.regex);
+      if (m) {
+        const params = {};
+        r.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+        return { route: r, params };
+      }
+    }
+    return null;
+  }
+
+  /** Resolve a rota atual da URL e executa o handler correspondente. */
+  function resolve() {
+    const path = currentPath();
+    const found = match(path);
+    if (found) { found.route.handler(found.params); return true; }
+    return false;
+  }
+
+  /** Navega para uma rota — atualiza a URL e dispara o handler. */
+  function navigate(path, { replace = false } = {}) {
+    if (!path.startsWith('/')) path = '/' + path;
+    const target = '#' + path;
+    dispatching = true;
+    if (replace) history.replaceState(null, '', target);
+    else history.pushState(null, '', target);
+    dispatching = false;
+    resolve();
+  }
+
+  /** Sincroniza a URL com o estado atual SEM re-executar o handler
+      (usado dentro dos próprios App.go*() para refletir a rota já processada). */
+  function setSilent(path) {
+    if (!path.startsWith('/')) path = '/' + path;
+    const target = '#' + path;
+    if (location.hash !== target) history.replaceState(null, '', target);
+  }
+
+  // Botão voltar/avançar do navegador
+  window.addEventListener('popstate', () => {
+    if (dispatching) return;
+    resolve();
+  });
+
+  return { register, navigate, resolve, setSilent, currentPath };
+})();
