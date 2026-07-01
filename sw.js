@@ -1,13 +1,14 @@
 /* ============================================================
    Service Worker — Auditoria SSMA
-   Versão: 4.1 — atualizar CACHE_NAME ao publicar mudanças
+   Versão: 4.2 — atualizar CACHE_NAME ao publicar mudanças
    ============================================================ */
-const CACHE_NAME = 'auditoria-ssma-v9';
+const CACHE_NAME = 'auditoria-ssma-v15';
 
 const LOCAL_FILES = [
   './',
   './index.html',
   './app.js',
+  './router.js',
   './style.css',
   './config.js',
   './supabaseClient.js',
